@@ -1,0 +1,17 @@
+define flow verify identity before order lookup
+  user said $input
+  $lower = execute to_lower(text=$input)
+  $is_order_query = execute contains_any(text=$lower, keywords=["order", "track", "where is", "status"])
+  if $is_order_query
+    bot say "To look up your order I need to verify your identity. What is your full name?"
+    user said $customer_name
+    $order_id = execute extract_order_id(text=$input)
+    if not $order_id
+      bot say "I couldn't find an order number. Please provide it (e.g. ORD-001)."
+      stop
+    $result = execute lookup_order(order_id=$order_id, customer_name=$customer_name)
+    if $result == "not_found"
+      bot say "Order not found or identity verification failed. Please check your details."
+      stop
+    bot say "Here are your order details: {$result}"
+    stop

@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retailbot
+  namespace: retailbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retailbot
+  template:
+    metadata:
+      labels:
+        app: retailbot
+    spec:
+      initContainers:
+      - name: install-deps
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "==> Installing system build tools..."
+          apt-get update -qq && apt-get install -y --no-install-recommends \
+            g++ gcc make build-essential libpq-dev -qq
+
+          echo "==> Creating dirs..."
+          mkdir -p /app/guardrails/colang /app/site-packages
+
+          echo "==> Copying guardrails config..."
+          cp /guardrails-config/* /app/guardrails/colang/
+
+          echo "==> Installing Python packages into /app/site-packages..."
+          pip install --upgrade pip -q
+          pip install \
+            fastapi \
+            "uvicorn[standard]" \
+            "nemoguardrails==0.10.1" \
+            psycopg2-binary \
+            pgvector \
+            openai \
+            httpx \
+            langchain-nvidia-ai-endpoints \
+            --target /app/site-packages \
+            --no-cache-dir \
+            -q
+
+          echo "==> Init done."
+        volumeMounts:
+        - name: guardrails-vol
+          mountPath: /guardrails-config
+        - name: app-dir
+          mountPath: /app
+
+      containers:
+      - name: retailbot
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          export PYTHONPATH=/app/site-packages:$PYTHONPATH
+          echo "==> Starting RetailBot..."
+          python /retailbot_app.py
+        env:
+        - name: NIM_BASE_URL
+          value: "http://nim-llama:8000/v1"
+        - name: PG_CONN
+          value: "postgresql://retailbot:retailbot_secret@pgvector:5432/retailbot"
+        - name: ORDER_API_URL
+          value: "http://mock-order-api:8001"
+        - name: PYTHONPATH
+          value: "/app/site-packages"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: app-dir
+          mountPath: /app
+        - name: app-code
+          mountPath: /retailbot_app.py
+          subPath: retailbot_app.py
+
+      volumes:
+      - name: guardrails-vol
+        configMap:
+          name: guardrails-config
+      - name: app-dir
+        emptyDir: {}
+      - name: app-code
+        configMap:
+          name: retailbot-app-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: retailbot
+  namespace: retailbot
+spec:
+  type: NodePort
+  selector:
+    app: retailbot
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30080

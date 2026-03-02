@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-order-api
+  namespace: retailbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-order-api
+  template:
+    metadata:
+      labels:
+        app: mock-order-api
+    spec:
+      containers:
+      - name: mock-order-api
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install fastapi uvicorn -q && cat > /app.py << 'EOF'
+          from fastapi import FastAPI, HTTPException
+          app = FastAPI()
+          ORDERS = {
+            "ORD-001": {"customer": "Alice", "status": "shipped", "items": ["Laptop"]},
+            "ORD-002": {"customer": "Bob",   "status": "processing", "items": ["Mouse","Keyboard"]},
+          }
+          @app.get("/orders/{order_id}")
+          def get_order(order_id: str, customer_name: str):
+              order = ORDERS.get(order_id)
+              if not order:
+                  raise HTTPException(404, "Order not found")
+              if order["customer"].lower() != customer_name.lower():
+                  raise HTTPException(403, "Identity verification failed")
+              return order
+          EOF
+          uvicorn app:app --host 0.0.0.0 --port 8001
+        ports:
+        - containerPort: 8001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-order-api
+  namespace: retailbot
+spec:
+  selector:
+    app: mock-order-api
+  ports:
+  - port: 8001
+    targetPort: 8001

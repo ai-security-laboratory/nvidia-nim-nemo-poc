@@ -1,0 +1,12 @@
+flow input rails $input_text
+  check prompt injection
+  check pii in input
+  check topical
+
+flow output rails $output_text
+  check hallucinated policy
+
+flow main
+  activate input rails
+  activate output rails
+  activate verify identity before order lookup
