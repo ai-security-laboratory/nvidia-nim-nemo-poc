@@ -1,12 +1,3 @@
-define flow input rails
-  execute check prompt injection
-  execute check pii in input
-  execute check topical
-
-define flow output rails
-  execute check hallucinated policy
-
 define flow main
-  activate input rails
-  activate output rails
-  activate verify identity before order lookup
+  user ...
+  bot ...

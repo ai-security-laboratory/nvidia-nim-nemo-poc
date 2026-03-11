@@ -17,6 +17,7 @@ env/
 
 # Secrets & credentials
 deploy.sh
+test.sh
 *secret*
 *credentials*
 *token*

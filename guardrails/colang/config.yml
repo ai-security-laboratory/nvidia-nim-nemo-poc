@@ -6,3 +6,13 @@ models:
       base_url: "http://nim-llm.nim.svc.cluster.local:8000/v1"
 
 colang_version: "1.0"
+
+rails:
+  input:
+    flows:
+      - check prompt injection
+      - check pii in input
+      - check topical
+  output:
+    flows:
+      - check hallucinated policy

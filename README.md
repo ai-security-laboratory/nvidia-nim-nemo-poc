@@ -58,17 +58,21 @@ nvidia-nim-nemo-poc/
 ├── guardrails/
 │   └── colang/
 │       ├── config.yml           # NeMo model config — NIM endpoint + colang_version
-│       ├── main.co              # Entry point — activates all rails
-│       ├── input_rails.co       # Prompt injection · PII · topical filter
+│       ├── main.co              # Entry point (catch-all flow)
+│       ├── input_rails.co       # Colang subflow definitions (called by Python layer)
 │       ├── output_rails.co      # Hallucinated policy detection
-│       └── dialog_rails.co      # Identity verification before order lookup
-├── retailbot_app.py             # FastAPI app + NeMo Guardrails integration
+│       └── dialog_rails.co      # Order lookup dialog pattern (Colang 1.0)
+├── inference/
+│   └── chat_ui.html             # Local browser chat UI (served via test.sh proxy)
+├── retailbot_app.py             # FastAPI app — input checks in Python + NeMo for output rail
 ├── retailbot-deployment.yaml    # K8s Deployment (initContainer) + NodePort Service
 ├── pgvector.yaml                # K8s Deployment + Service for pgvector
 ├── mock-order-api.yaml          # K8s Deployment + Service for mock order API
 ├── nim-llm-values.yaml          # Helm values for NIM LLM (llama-3.1-8b)
 └── CLAUDE.md                    # AI assistant context for this project
 ```
+
+> `deploy.sh` and `test.sh` are gitignored — they contain SSH connection details.
 
 ---
 
@@ -350,6 +354,22 @@ kubectl logs deploy/retailbot -n retailbot
 
 ---
 
+## Local Browser Testing
+
+A chat UI is available at `inference/chat_ui.html`. Since the VM is not publicly exposed, use the `test.sh` script (gitignored) to open an SSH tunnel and local proxy:
+
+```bash
+./test.sh
+# Opens http://localhost:8080 in your browser automatically
+```
+
+`test.sh` does three things:
+1. SSHes into the VM to auto-detect `$NODE_IP` via `microk8s kubectl get nodes`
+2. Opens an SSH tunnel: `localhost:30080 → NODE_IP:30080` on the remote
+3. Starts a local Python proxy on `:8080` that serves the HTML and forwards API calls — avoids browser CORS restrictions when opening the file locally
+
+---
+
 ## Testing
 
 ```bash
@@ -392,20 +412,28 @@ Test orders in mock API: `ORD-001` (Alice, shipped) · `ORD-002` (Bob, processin
 
 ## Guardrails Reference
 
-| File | Guards Against |
+| File | Role |
 |---|---|
-| `input_rails.co` | Prompt injection (`ignore previous instructions`, `you are now`, `disregard`) · PII (credit cards, SSNs) · Off-topic queries |
-| `output_rails.co` | Hallucinated return/refund policy claims |
-| `dialog_rails.co` | Unauthorized order lookups — requires name + order ID |
-| `main.co` | Entry point — activates all rails and wires flows |
+| `input_rails.co` | Defines Colang subflows — but input blocking is enforced in Python (see below) |
+| `output_rails.co` | Hallucinated return/refund policy detection — runs via `rails:` in `config.yml` |
+| `dialog_rails.co` | Colang 1.0 dialog pattern for order lookup intent |
+| `main.co` | Catch-all `define flow main` required by NeMo |
+
+### Input rail implementation
+
+In NeMo Guardrails 0.10.x with Colang 1.0, the `$user_message` variable is not reliably bound in input rail subflows called via the `rails:` config section. As a result, input checks are implemented **directly in Python** in `retailbot_app.py` before calling `generate_async`. The Colang subflow definitions in `input_rails.co` are kept for documentation but are not the enforcement layer.
+
+```
+Request → Python input checks (injection / PII / topic) → rails.generate_async → output rail (Colang)
+```
 
 ### Critical NeMo configuration rules
 
-- **`colang_version: "1.0"`** in `config.yml` — all `.co` files use Colang 1.0 `define flow` syntax. Setting `"2.x"` causes silent failures or empty responses.
+- **`colang_version: "1.0"`** in `config.yml` — all `.co` files use Colang 1.0 `define subflow` / `define flow` syntax. Mixing in Colang 2.x syntax (e.g. `user said $variable` for mid-flow capture) causes silent parse failures that break all flow loading.
 - **Full FQDN for NIM** — `base_url` in `config.yml` must be `http://nim-llm.nim.svc.cluster.local:8000/v1`. Short names fail cross-namespace DNS.
 - **`nemoguardrails==0.10.1`** pinned — do not use `>=`.
 - **No docstrings** inside flow definitions (`"""..."""` breaks Colang 1.0 parsing).
-- **Wire flows in `main.co`** — the `rails:` section in `config.yml` is deprecated in 0.10.x.
+- **`rails:` in `config.yml`** — use this to register output rail flows. Works reliably for output rails; input checking is handled in Python.
 
 ---
 
@@ -420,7 +448,10 @@ Test orders in mock API: `ORD-001` (Alice, shipped) · `ORD-002` (Bob, processin
 | Pod networking broken | iptables blocking forwarding | `sudo iptables -F && sudo iptables -P FORWARD ACCEPT` |
 | NeMo returns empty responses | Wrong NIM hostname in `config.yml` | Full FQDN: `http://nim-llm.nim.svc.cluster.local:8000/v1` |
 | NeMo rails not loading | `colang_version: "2.x"` with Colang 1.0 syntax | `colang_version: "1.0"` |
-| ConfigMap change not picked up | initContainer only runs at pod creation | `kubectl delete pod` — rollout restart is not enough |
+| Input rails not blocking | `$user_message` not reliably bound in Colang 1.0 subflows in NeMo 0.10.x | Implement input checks directly in Python before calling `generate_async` |
+| Colang parse error breaks all flows | Mixing Colang 2.x syntax (`user said $var`) in a `colang_version: "1.0"` project | Use only `define subflow` / `define flow` / `define user` / `define bot` syntax |
+| `generate_async` returns dict not string | NeMo returns `{"role": "assistant", "content": "..."}` | Extract with `response.get("content", str(response))` |
+| ConfigMap change not picked up | initContainer only runs at pod creation | `kubectl delete configmap` + recreate + `kubectl rollout restart` |
 | iptables lost after reboot | microk8s does not persist FORWARD rules | Re-run iptables commands after every reboot |
 
 ---

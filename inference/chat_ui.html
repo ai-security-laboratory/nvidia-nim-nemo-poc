@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RetailBot Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f0f2f5; display: flex; flex-direction: column; height: 100vh; }
+
+    header {
+      background: #1a1a2e; color: white; padding: 12px 20px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    header .badge { background: #76b900; color: white; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; }
+
+    .config-bar {
+      background: #fff; border-bottom: 1px solid #ddd;
+      padding: 8px 20px; display: flex; align-items: center; gap: 8px; font-size: 0.85rem;
+    }
+    .config-bar label { color: #555; }
+    .config-bar input {
+      border: 1px solid #ccc; border-radius: 4px; padding: 4px 8px;
+      font-size: 0.85rem; width: 280px;
+    }
+    #status { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: #eee; color: #666; }
+    #status.ok { background: #e6f4ea; color: #2e7d32; }
+    #status.err { background: #fdecea; color: #c62828; }
+
+    #chat {
+      flex: 1; overflow-y: auto; padding: 20px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    .msg { display: flex; gap: 10px; max-width: 75%; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.bot  { align-self: flex-start; }
+
+    .bubble {
+      padding: 10px 14px; border-radius: 16px; font-size: 0.9rem; line-height: 1.5;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .user .bubble { background: #1a1a2e; color: white; border-bottom-right-radius: 4px; }
+    .bot  .bubble { background: white; color: #222; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem; flex-shrink: 0; align-self: flex-end;
+    }
+    .user .avatar { background: #1a1a2e; color: white; }
+    .bot  .avatar { background: #76b900; color: white; }
+
+    .typing .bubble { color: #999; font-style: italic; }
+
+    footer {
+      background: white; border-top: 1px solid #ddd;
+      padding: 12px 20px; display: flex; gap: 10px;
+    }
+    #input {
+      flex: 1; border: 1px solid #ccc; border-radius: 20px;
+      padding: 10px 16px; font-size: 0.9rem; outline: none; resize: none;
+      font-family: inherit; max-height: 120px;
+    }
+    #input:focus { border-color: #76b900; }
+    #send {
+      background: #76b900; color: white; border: none; border-radius: 20px;
+      padding: 10px 20px; cursor: pointer; font-size: 0.9rem; font-weight: 600;
+      transition: background 0.2s;
+    }
+    #send:hover { background: #5a8c00; }
+    #send:disabled { background: #ccc; cursor: not-allowed; }
+
+    .clear-btn {
+      background: none; border: 1px solid #ddd; border-radius: 20px;
+      padding: 10px 14px; cursor: pointer; font-size: 0.85rem; color: #666;
+    }
+    .clear-btn:hover { background: #f5f5f5; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="avatar bot" style="width:36px;height:36px;font-size:1rem;">🤖</div>
+  <h1>RetailBot</h1>
+  <span class="badge">NIM + NeMo Guardrails</span>
+</header>
+
+<div class="config-bar">
+  <label for="endpoint">Endpoint:</label>
+  <input id="endpoint" type="text" value="http://localhost:8080" placeholder="http://<NODE_IP>:30080" />
+  <span id="status">–</span>
+  <button class="clear-btn" onclick="checkHealth()">Check</button>
+</div>
+
+<div id="chat"></div>
+
+<footer>
+  <textarea id="input" rows="1" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
+  <button class="clear-btn" onclick="clearChat()">Clear</button>
+  <button id="send" onclick="sendMessage()">Send</button>
+</footer>
+
+<script>
+  const chatEl = document.getElementById('chat');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+  const statusEl = document.getElementById('status');
+  let history = [];
+
+  function endpoint() {
+    return document.getElementById('endpoint').value.replace(/\/$/, '');
+  }
+
+  async function checkHealth() {
+    statusEl.textContent = 'Checking…';
+    statusEl.className = '';
+    try {
+      const r = await fetch(endpoint() + '/health', { signal: AbortSignal.timeout(3000) });
+      if (r.ok) { statusEl.textContent = 'Online'; statusEl.className = 'ok'; }
+      else       { statusEl.textContent = 'Error ' + r.status; statusEl.className = 'err'; }
+    } catch {
+      statusEl.textContent = 'Unreachable'; statusEl.className = 'err';
+    }
+  }
+
+  function appendMsg(role, text) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    div.innerHTML = `
+      <div class="avatar">${role === 'user' ? '👤' : '🤖'}</div>
+      <div class="bubble">${escHtml(text)}</div>`;
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    return div;
+  }
+
+  function escHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  async function sendMessage() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    appendMsg('user', text);
+    history.push({ role: 'user', content: text });
+
+    const typing = appendMsg('bot', '…');
+    typing.classList.add('typing');
+
+    try {
+      const res = await fetch(endpoint() + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, history: history.slice(0, -1) }),
+        signal: AbortSignal.timeout(30000)
+      });
+
+      typing.remove();
+
+      if (!res.ok) {
+        appendMsg('bot', `Error ${res.status}: ${await res.text()}`);
+      } else {
+        const data = await res.json();
+        const reply = typeof data.response === 'string' ? data.response : JSON.stringify(data.response ?? data);
+        appendMsg('bot', reply);
+        history.push({ role: 'assistant', content: reply });
+      }
+    } catch (e) {
+      typing.remove();
+      appendMsg('bot', 'Connection error: ' + e.message);
+    }
+
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  function clearChat() {
+    chatEl.innerHTML = '';
+    history = [];
+  }
+
+  // Enter to send, Shift+Enter for newline
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+
+  // Auto-resize textarea
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = inputEl.scrollHeight + 'px';
+  });
+
+  // Check health on load
+  checkHealth();
+</script>
+</body>
+</html>

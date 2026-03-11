@@ -1,7 +1,5 @@
-define flow check hallucinated policy
-  bot said $output
-  $lower = execute to_lower(text=$output)
-  $risky = execute check_policy_claim(text=$lower)
+define subflow check hallucinated policy
+  $risky = execute check_policy_claim(text=$bot_message)
   if $risky
     bot say "I'm not certain about that policy. Please check our official website or contact support."
     stop
