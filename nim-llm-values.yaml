@@ -1,22 +1,32 @@
 image:
   repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
   tag: latest
+
+model:
+  ngcAPISecret: ngc-api-key
+
 resources:
   requests:
     nvidia.com/gpu: 1
   limits:
     nvidia.com/gpu: 1
+
 env:
   - name: NGC_API_KEY
     valueFrom:
       secretKeyRef:
         name: ngc-api-key
         key: NGC_API_KEY
+  - name: NIM_MAX_MODEL_LEN
+    value: "32768"   # Required — A10 has ~4GB KV cache free after model load; default 128K context needs 16GB
+
+customArgs: []   # MUST be empty array — setting to "" causes: exec: --: invalid option
+
 persistence:
   enabled: true
   size: 50Gi
   storageClass: microk8s-hostpath
+
 service:
   type: ClusterIP
   port: 8000
-

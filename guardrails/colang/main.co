@@ -1,12 +1,12 @@
-flow input rails $input_text
-  check prompt injection
-  check pii in input
-  check topical
+define flow input rails
+  execute check prompt injection
+  execute check pii in input
+  execute check topical
 
-flow output rails $output_text
-  check hallucinated policy
+define flow output rails
+  execute check hallucinated policy
 
-flow main
+define flow main
   activate input rails
   activate output rails
   activate verify identity before order lookup
