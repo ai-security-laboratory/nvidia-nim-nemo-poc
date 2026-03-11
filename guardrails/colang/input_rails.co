@@ -1,0 +1,32 @@
+define flow check prompt injection
+  user said $input
+  $lower = execute to_lower(text=$input)
+  if $lower contains "ignore previous instructions"
+    bot say "I can only help with retail-related questions."
+    stop
+  if $lower contains "you are now"
+    bot say "I can only help with retail-related questions."
+    stop
+  if $lower contains "disregard"
+    bot say "I can only help with retail-related questions."
+    stop
+
+define flow check pii in input
+  user said $input
+  $has_cc = execute check_credit_card(text=$input)
+  if $has_cc
+    bot say "Please don't share sensitive information like credit card numbers."
+    stop
+  $has_ssn = execute check_ssn(text=$input)
+  if $has_ssn
+    bot say "Please don't share sensitive information like SSNs."
+    stop
+
+define flow check topical
+  user said $input
+  $lower = execute to_lower(text=$input)
+  $retail_topics = ["order", "product", "return", "shipping", "payment", "refund", "delivery", "store", "purchase", "item"]
+  $found = execute contains_any(text=$lower, keywords=$retail_topics)
+  if not $found
+    bot say "I'm RetailBot and can only assist with shopping, orders, and returns."
+    stop

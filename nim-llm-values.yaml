@@ -1,0 +1,22 @@
+image:
+  repository: nvcr.io/nim/meta/llama-3.1-8b-instruct
+  tag: latest
+resources:
+  requests:
+    nvidia.com/gpu: 1
+  limits:
+    nvidia.com/gpu: 1
+env:
+  - name: NGC_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ngc-api-key
+        key: NGC_API_KEY
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: microk8s-hostpath
+service:
+  type: ClusterIP
+  port: 8000
+
