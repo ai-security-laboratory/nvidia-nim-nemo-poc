@@ -201,7 +201,8 @@ async def invoke_agent(messages: list) -> str:
             history.add_assistant_message(m["content"])
 
     settings = OpenAIChatPromptExecutionSettings(
-        function_choice_behavior=FunctionChoiceBehavior.Auto()
+        function_choice_behavior=FunctionChoiceBehavior.Auto(),
+        parallel_tool_calls=False,
     )
 
     result = await kernel.get_service().get_chat_message_content(
