@@ -1,31 +1,89 @@
-# RetailBot — NVIDIA NIM + NeMo Guardrails PoC
+# RetailBot — NVIDIA NIM + NeMo Guardrails + Semantic Kernel PoC
 
-A production-grade agentic retail assistant running entirely on a single GPU VM. Demonstrates deploying an LLM microservice with NeMo Guardrails, RAG (pgvector), and a mock backend API on Kubernetes (microk8s), backed by NVIDIA NIM for accelerated LLM inference.
+An agentic retail assistant running entirely on a single GPU VM (microk8s · Ubuntu 22.04 · OCI A10).
+Demonstrates LLM inference with NVIDIA NIM, agentic orchestration with Microsoft Semantic Kernel,
+safety guardrails with NeMo, and runtime security detection with Falco/Sysdig.
 
 ---
 
 ## Architecture
 
 ```
-User / curl
+User / Browser (chat_ui.html)
     │
     ▼
 RetailBot FastAPI  (retailbot ns · port 8080 · NodePort 30080)
-    │   NeMo Guardrails 0.10.1 (inline — same pod)
-    │       ├── input_rails.co   — prompt injection, PII, topical filter
-    │       ├── output_rails.co  — hallucinated policy detection
-    │       ├── dialog_rails.co  — identity verification before order lookup
-    │       └── main.co          — entry point, activates all flows
     │
-    ├──▶ NIM LLM  (nim ns · port 8000 · ClusterIP)
-    │        └── meta/llama-3.1-8b-instruct (vLLM · bf16 · tp1)
-    │            NIM_MAX_MODEL_LEN=32768  ← required on A10 24GB
+    ├── NeMo Guardrails — INPUT (Python layer)
+    │       ├── Prompt injection check
+    │       ├── PII detection (credit card, SSN)
+    │       └── Topical filter (retail only)
+    │
+    ├── Semantic Kernel  ──▶  NIM LLM  (nim ns · port 8000 · ClusterIP)
+    │       │                    └── meta/llama-3.1-8b-instruct
+    │       │                        OpenAI-compatible endpoint
+    │       │
+    │       ├──▶ CRM Plugin       (retailbot ns · port 8002)
+    │       │        └── FastAPI mock — customer profile, loyalty tier,
+    │       │                           purchase history
+    │       │
+    │       ├──▶ ERP Plugin       (retailbot ns · port 8003)
+    │       │        └── FastAPI mock — inventory levels, order management,
+    │       │                           pricing, promotions
+    │       │
+    │       └──▶ Logistics Plugin (retailbot ns · port 8004)
+    │                └── FastAPI mock — shipment tracking, carrier info,
+    │                                   estimated delivery dates
+    │
+    ├── NeMo Guardrails — OUTPUT (Colang 1.0)
+    │       └── Hallucinated policy detection
     │
     ├──▶ pgvector  (retailbot ns · port 5432)
-    │        └── PostgreSQL 16 + pgvector extension
+    │        └── PostgreSQL 16 + pgvector (RAG — not yet populated)
     │
     └──▶ Mock Order API  (retailbot ns · port 8001)
-             └── FastAPI — returns fake order data for ORD-xxx lookups
+             └── FastAPI — legacy order lookup (ORD-xxx)
+```
+
+---
+
+## User Flow
+
+```
+1. User sends a message via chat_ui.html or curl
+        │
+        ▼
+2. NeMo input checks (Python)
+   ├── Prompt injection?  → BLOCK "I can only help with retail questions"
+   ├── PII detected?      → BLOCK "Please don't share sensitive info"
+   └── Off-topic?         → BLOCK "I'm RetailBot, retail only"
+        │ (passes)
+        ▼
+3. Semantic Kernel receives the message
+   SK uses NIM (OpenAI-compatible) as its reasoning LLM
+   SK autonomously decides which tools to invoke based on intent:
+   │
+   ├── "What's my order status?" or "Where is my package?"
+   │       → ERP Plugin (order details) + Logistics Plugin (tracking)
+   │
+   ├── "Do I have any loyalty points?" or "What's my purchase history?"
+   │       → CRM Plugin (customer profile + history)
+   │
+   ├── "Is the laptop in stock?" or "What's the price of X?"
+   │       → ERP Plugin (inventory + pricing)
+   │
+   └── "What is your return policy?" (no tool needed)
+           → NIM answers directly from training knowledge
+        │
+        ▼
+4. SK synthesizes tool results + LLM reasoning into a final response
+        │
+        ▼
+5. NeMo output check (Colang)
+   └── Hallucinated policy claim? → REPLACE with "check our website"
+        │ (passes)
+        ▼
+6. Response returned to user
 ```
 
 ---
@@ -39,8 +97,10 @@ RetailBot FastAPI  (retailbot ns · port 8080 · NodePort 30080)
 | GPU Operator | `microk8s enable nvidia` | Installs drivers + container toolkit automatically |
 | Storage | microk8s hostpath-provisioner | Local PVC for NIM model cache (50Gi) |
 | Networking | Calico + iptables flush | `iptables -F` required after every reboot |
-| LLM | NVIDIA NIM | `nvcr.io/nim/meta/llama-3.1-8b-instruct:latest` |
-| Guardrails | NeMo Guardrails 0.10.1 | Colang 1.0 syntax · inline in RetailBot pod |
+| LLM | NVIDIA NIM | `nvcr.io/nim/meta/llama-3.1-8b-instruct:latest` · OpenAI-compatible endpoint |
+| Agentic orchestration | Microsoft Semantic Kernel (Python) | Tool plugins for CRM, ERP, Logistics · inline in RetailBot pod |
+| Guardrails | NeMo Guardrails 0.10.1 | Colang 1.0 · input checks in Python · output rail in Colang |
+| Runtime security | Falco / Sysdig | Detects shell spawn, credential access, unexpected connections |
 
 ### Why these choices
 
@@ -58,16 +118,23 @@ nvidia-nim-nemo-poc/
 ├── guardrails/
 │   └── colang/
 │       ├── config.yml           # NeMo model config — NIM endpoint + colang_version
-│       ├── main.co              # Entry point (catch-all flow)
-│       ├── input_rails.co       # Colang subflow definitions (called by Python layer)
+│       ├── main.co              # Catch-all flow (required by NeMo)
+│       ├── input_rails.co       # Colang subflow definitions (enforcement in Python)
 │       ├── output_rails.co      # Hallucinated policy detection
 │       └── dialog_rails.co      # Order lookup dialog pattern (Colang 1.0)
 ├── inference/
 │   └── chat_ui.html             # Local browser chat UI (served via test.sh proxy)
-├── retailbot_app.py             # FastAPI app — input checks in Python + NeMo for output rail
+├── offensive/
+│   ├── README.md                # Attack documentation + MITRE ATT&CK mapping
+│   └── attack.sh                # Shell spawn simulation — triggers Falco alerts
+├── retailbot_app.py             # FastAPI entrypoint — NeMo input checks + SK orchestration
+├── sk_agent.py                  # (planned) Semantic Kernel kernel + CRM/ERP/Logistics plugins
 ├── retailbot-deployment.yaml    # K8s Deployment (initContainer) + NodePort Service
 ├── pgvector.yaml                # K8s Deployment + Service for pgvector
-├── mock-order-api.yaml          # K8s Deployment + Service for mock order API
+├── mock-order-api.yaml          # K8s Deployment + Service for mock order API (port 8001)
+├── mock-crm.yaml                # (planned) K8s Deployment + Service for mock CRM (port 8002)
+├── mock-erp.yaml                # (planned) K8s Deployment + Service for mock ERP (port 8003)
+├── mock-logistics.yaml          # (planned) K8s Deployment + Service for mock Logistics (port 8004)
 ├── nim-llm-values.yaml          # Helm values for NIM LLM (llama-3.1-8b)
 └── CLAUDE.md                    # AI assistant context for this project
 ```
@@ -456,10 +523,21 @@ Request → Python input checks (injection / PII / topic) → rails.generate_asy
 
 ---
 
-## What Is Not Yet Done
+## Roadmap
 
-- [ ] pgvector populated with retail knowledge base (RAG non-functional)
-- [ ] Mock Order API `/health` endpoint (currently 404 — only `/orders/{id}` works)
-- [ ] Observability: Sysdig agent, DCGM GPU metrics, Falco runtime security
+### In progress
+- [ ] Semantic Kernel integration — `sk_agent.py` with CRM, ERP, Logistics plugins
+- [ ] Mock CRM API (`mock-crm.yaml` · port 8002) — customer profile, loyalty, purchase history
+- [ ] Mock ERP API (`mock-erp.yaml` · port 8003) — inventory, orders, pricing, promotions
+- [ ] Mock Logistics API (`mock-logistics.yaml` · port 8004) — tracking, carrier, ETA
+
+### Planned
+- [ ] Falco/Sysdig deployment on the cluster + custom rules for AI workload
+- [ ] More attack simulations in `offensive/` (token theft, exfiltration, crypto miner)
+- [ ] pgvector populated with retail knowledge base (RAG)
 - [ ] Ingress hostname routing (currently NodePort 30080 only)
-- [ ] End-to-end guardrails validation with regression tests
+- [ ] End-to-end guardrails regression tests
+
+### Known gaps
+- [ ] Mock Order API has no `/health` endpoint (only `/orders/{id}` works)
+- [ ] pgvector RAG non-functional (schema and embeddings not yet loaded)
