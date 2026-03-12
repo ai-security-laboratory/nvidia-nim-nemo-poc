@@ -140,7 +140,7 @@ class PolicyPlugin:
     def _search_sync(self, query: str) -> str:
         try:
             embedding = list(get_embed_model().embed([query]))[0].tolist()
-            conn = psycopg2.connect(PG_CONN)
+            conn = psycopg2.connect(PG_CONN, connect_timeout=5)
             register_vector(conn)
             with conn.cursor() as cur:
                 cur.execute(
@@ -410,5 +410,6 @@ async def invoke_agent(messages: list) -> str:
     resp = await get_nim_client().chat.completions.create(
         model=NIM_MODEL,
         messages=conversation,
+        max_tokens=512,
     )
     return resp.choices[0].message.content or "I'm sorry, I couldn't process your request."

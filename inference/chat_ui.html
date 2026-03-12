@@ -159,7 +159,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, history: history.slice(0, -1) }),
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(120000)
       });
 
       typing.remove();
