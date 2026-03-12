@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-crm
+  namespace: retailbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-crm
+  template:
+    metadata:
+      labels:
+        app: mock-crm
+    spec:
+      containers:
+      - name: mock-crm
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install fastapi uvicorn -q && cat > /app.py << 'EOF'
+          from fastapi import FastAPI, HTTPException
+          import json
+
+          app = FastAPI()
+
+          CUSTOMERS = {
+            "C-001": {
+              "id": "C-001",
+              "name": "Alice Johnson",
+              "email": "alice@example.com",
+              "loyalty_tier": "Gold",
+              "loyalty_points": 4200,
+              "total_orders": 15,
+              "lifetime_value": 2400.00,
+              "purchase_history": [
+                {"order_id": "ORD-001", "item": "Laptop", "amount": 1999.00, "date": "2025-02-15"},
+                {"order_id": "ORD-003", "item": "Mouse", "amount": 45.00, "date": "2025-01-10"}
+              ]
+            },
+            "C-002": {
+              "id": "C-002",
+              "name": "Bob Smith",
+              "email": "bob@example.com",
+              "loyalty_tier": "Silver",
+              "loyalty_points": 890,
+              "total_orders": 8,
+              "lifetime_value": 890.00,
+              "purchase_history": [
+                {"order_id": "ORD-002", "item": "Mouse", "amount": 45.00, "date": "2025-03-01"},
+                {"order_id": "ORD-002", "item": "Keyboard", "amount": 80.00, "date": "2025-03-01"}
+              ]
+            }
+          }
+
+          @app.get("/customers/{customer_id}")
+          def get_customer(customer_id: str):
+              customer = CUSTOMERS.get(customer_id.upper())
+              if not customer:
+                  raise HTTPException(404, f"Customer {customer_id} not found")
+              return customer
+
+          @app.get("/health")
+          def health():
+              return {"status": "ok"}
+          EOF
+          uvicorn app:app --host 0.0.0.0 --port 8002
+        ports:
+        - containerPort: 8002
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-crm
+  namespace: retailbot
+spec:
+  selector:
+    app: mock-crm
+  ports:
+  - port: 8002
+    targetPort: 8002

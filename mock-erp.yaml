@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-erp
+  namespace: retailbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-erp
+  template:
+    metadata:
+      labels:
+        app: mock-erp
+    spec:
+      containers:
+      - name: mock-erp
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install fastapi uvicorn -q && cat > /app.py << 'EOF'
+          from fastapi import FastAPI, HTTPException
+          app = FastAPI()
+
+          INVENTORY = {
+            "sony wh-1000xm5": {"sku": "SONY-WH1XM5", "name": "Sony WH-1000XM5 Headphones", "price": 349.00, "stock": 24, "status": "in_stock"},
+            "macbook pro m3":  {"sku": "APPLE-MBP-M3", "name": "MacBook Pro 14 M3", "price": 1999.00, "stock": 3, "status": "low_stock"},
+            "usb-c hub":       {"sku": "ANKER-HUB-7", "name": "Anker 7-in-1 USB-C Hub", "price": 45.00, "stock": 150, "status": "in_stock"},
+            "mechanical keyboard": {"sku": "KBRD-MX-01", "name": "Keychron K2 Mechanical Keyboard", "price": 80.00, "stock": 0, "status": "out_of_stock"},
+            "wireless mouse":  {"sku": "MOUSE-LOG-MX", "name": "Logitech MX Master 3", "price": 99.00, "stock": 45, "status": "in_stock"},
+          }
+
+          ORDERS = {
+            "ORD-001": {"order_id": "ORD-001", "customer_id": "C-001", "status": "shipped",     "items": [{"sku": "APPLE-MBP-M3", "name": "MacBook Pro 14 M3", "qty": 1, "price": 1999.00}], "total": 1999.00, "date": "2025-02-15"},
+            "ORD-002": {"order_id": "ORD-002", "customer_id": "C-002", "status": "processing",  "items": [{"sku": "MOUSE-LOG-MX", "name": "Logitech MX Master 3", "qty": 1, "price": 99.00}, {"sku": "KBRD-MX-01", "name": "Keychron K2 Keyboard", "qty": 1, "price": 80.00}], "total": 179.00, "date": "2025-03-01"},
+            "ORD-003": {"order_id": "ORD-003", "customer_id": "C-001", "status": "delivered",   "items": [{"sku": "ANKER-HUB-7",  "name": "Anker USB-C Hub", "qty": 1, "price": 45.00}], "total": 45.00, "date": "2025-01-10"},
+          }
+
+          @app.get("/inventory")
+          def check_inventory(product: str):
+              key = product.lower()
+              matches = {k: v for k, v in INVENTORY.items() if key in k}
+              if not matches:
+                  raise HTTPException(404, f"No products found matching '{product}'")
+              return list(matches.values())
+
+          @app.get("/orders/{order_id}")
+          def get_order(order_id: str):
+              order = ORDERS.get(order_id.upper())
+              if not order:
+                  raise HTTPException(404, f"Order {order_id} not found")
+              return order
+
+          @app.get("/health")
+          def health():
+              return {"status": "ok"}
+          EOF
+          uvicorn app:app --host 0.0.0.0 --port 8003
+        ports:
+        - containerPort: 8003
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-erp
+  namespace: retailbot
+spec:
+  selector:
+    app: mock-erp
+  ports:
+  - port: 8003
+    targetPort: 8003

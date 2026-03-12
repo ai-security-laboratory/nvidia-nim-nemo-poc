@@ -36,11 +36,11 @@ spec:
             fastapi \
             "uvicorn[standard]" \
             "nemoguardrails==0.10.1" \
-            psycopg2-binary \
-            pgvector \
+            "semantic-kernel>=1.0.0" \
             openai \
             httpx \
-            langchain-nvidia-ai-endpoints \
+            psycopg2-binary \
+            pgvector \
             --target /app/site-packages \
             --no-cache-dir \
             -q
@@ -64,11 +64,19 @@ spec:
           python /retailbot_app.py
         env:
         - name: NIM_BASE_URL
-          value: "http://nim-llama:8000/v1"
+          value: "http://nim-llm.nim.svc.cluster.local:8000/v1"
+        - name: NIM_MODEL
+          value: "meta/llama-3.1-8b-instruct"
         - name: PG_CONN
           value: "postgresql://retailbot:retailbot_secret@pgvector:5432/retailbot"
         - name: ORDER_API_URL
           value: "http://mock-order-api:8001"
+        - name: CRM_URL
+          value: "http://mock-crm:8002"
+        - name: ERP_URL
+          value: "http://mock-erp:8003"
+        - name: LOGISTICS_URL
+          value: "http://mock-logistics:8004"
         - name: PYTHONPATH
           value: "/app/site-packages"
         ports:
@@ -79,6 +87,9 @@ spec:
         - name: app-code
           mountPath: /retailbot_app.py
           subPath: retailbot_app.py
+        - name: sk-agent-code
+          mountPath: /sk_agent.py
+          subPath: sk_agent.py
 
       volumes:
       - name: guardrails-vol
@@ -89,6 +100,9 @@ spec:
       - name: app-code
         configMap:
           name: retailbot-app-code
+      - name: sk-agent-code
+        configMap:
+          name: sk-agent-code
 ---
 apiVersion: v1
 kind: Service

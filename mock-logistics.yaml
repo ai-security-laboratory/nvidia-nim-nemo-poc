@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-logistics
+  namespace: retailbot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-logistics
+  template:
+    metadata:
+      labels:
+        app: mock-logistics
+    spec:
+      containers:
+      - name: mock-logistics
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          pip install fastapi uvicorn -q && cat > /app.py << 'EOF'
+          from fastapi import FastAPI, HTTPException
+          app = FastAPI()
+
+          SHIPMENTS = {
+            "ORD-001": {
+              "order_id": "ORD-001",
+              "carrier": "FedEx",
+              "tracking_number": "FX789012345",
+              "status": "in_transit",
+              "origin": "Los Angeles, CA",
+              "destination": "New York, NY",
+              "shipped_date": "2025-02-16",
+              "estimated_delivery": "2025-03-13",
+              "last_update": "Package in transit — Chicago, IL hub"
+            },
+            "ORD-002": {
+              "order_id": "ORD-002",
+              "carrier": "UPS",
+              "tracking_number": None,
+              "status": "processing",
+              "origin": "Seattle, WA",
+              "destination": "Austin, TX",
+              "shipped_date": None,
+              "estimated_delivery": "2025-03-17",
+              "last_update": "Order confirmed — awaiting warehouse pickup"
+            },
+            "ORD-003": {
+              "order_id": "ORD-003",
+              "carrier": "USPS",
+              "tracking_number": "US123456789",
+              "status": "delivered",
+              "origin": "Seattle, WA",
+              "destination": "New York, NY",
+              "shipped_date": "2025-01-11",
+              "estimated_delivery": "2025-01-14",
+              "last_update": "Delivered on 2025-01-14 at 2:34 PM"
+            },
+          }
+
+          @app.get("/shipments/{order_id}")
+          def track_shipment(order_id: str):
+              shipment = SHIPMENTS.get(order_id.upper())
+              if not shipment:
+                  raise HTTPException(404, f"No shipment found for order {order_id}")
+              return shipment
+
+          @app.get("/health")
+          def health():
+              return {"status": "ok"}
+          EOF
+          uvicorn app:app --host 0.0.0.0 --port 8004
+        ports:
+        - containerPort: 8004
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-logistics
+  namespace: retailbot
+spec:
+  selector:
+    app: mock-logistics
+  ports:
+  - port: 8004
+    targetPort: 8004
