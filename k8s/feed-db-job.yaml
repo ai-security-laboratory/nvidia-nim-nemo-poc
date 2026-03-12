@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: feed-db
+  namespace: retailbot
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: feed-db
+        image: python:3.11-slim
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "==> Installing dependencies..."
+          pip install fastembed psycopg2-binary pgvector -q
+
+          echo "==> Running feed_db.py..."
+          python /feed_db.py
+        env:
+        - name: PG_CONN
+          value: "postgresql://retailbot:retailbot_secret@pgvector:5432/retailbot"
+        - name: DATA_DIR
+          value: "/data"
+        volumeMounts:
+        - name: feed-db-code
+          mountPath: /feed_db.py
+          subPath: feed_db.py
+        - name: retail-knowledge-data
+          mountPath: /data
+
+      volumes:
+      - name: feed-db-code
+        configMap:
+          name: feed-db-code
+      - name: retail-knowledge-data
+        configMap:
+          name: retail-knowledge-data

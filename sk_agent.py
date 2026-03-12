@@ -3,7 +3,11 @@
 # autonomously decides which tools to call based on user intent.
 
 import os
+import asyncio
 import httpx
+import psycopg2
+from pgvector.psycopg2 import register_vector
+from fastembed import TextEmbedding
 from semantic_kernel import Kernel
 from semantic_kernel.connectors.ai.open_ai import (
     OpenAIChatCompletion,
@@ -19,6 +23,52 @@ NIM_MODEL      = os.environ.get("NIM_MODEL",      "meta/llama-3.1-8b-instruct")
 CRM_URL        = os.environ.get("CRM_URL",        "http://mock-crm:8002")
 ERP_URL        = os.environ.get("ERP_URL",        "http://mock-erp:8003")
 LOGISTICS_URL  = os.environ.get("LOGISTICS_URL",  "http://mock-logistics:8004")
+PG_CONN        = os.environ.get("PG_CONN",        "postgresql://retailbot:retailbot_secret@pgvector:5432/retailbot")
+EMBED_MODEL    = "BAAI/bge-small-en-v1.5"
+
+_embed_model: TextEmbedding | None = None
+
+def get_embed_model() -> TextEmbedding:
+    global _embed_model
+    if _embed_model is None:
+        _embed_model = TextEmbedding(EMBED_MODEL)
+    return _embed_model
+
+class PolicyPlugin:
+    """Retail knowledge base — policies, FAQs, warranty, shipping, loyalty, payments."""
+
+    @kernel_function(
+        name="search_knowledge_base",
+        description=(
+            "Search the retail knowledge base for information about return policy, "
+            "shipping policy, warranty terms, loyalty program benefits, payment methods, "
+            "or general store FAQs"
+        ),
+    )
+    async def search_knowledge_base(self, query: str) -> str:
+        return await asyncio.get_event_loop().run_in_executor(None, self._search, query)
+
+    def _search(self, query: str) -> str:
+        try:
+            model = get_embed_model()
+            embedding = list(model.embed([query]))[0].tolist()
+
+            conn = psycopg2.connect(PG_CONN)
+            register_vector(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT content FROM knowledge_base ORDER BY embedding <-> %s::vector LIMIT 3",
+                    (embedding,),
+                )
+                rows = cur.fetchall()
+            conn.close()
+
+            if not rows:
+                return "No relevant information found in the knowledge base."
+            return "\n\n---\n\n".join(row[0] for row in rows)
+        except Exception as e:
+            return f"Knowledge base unavailable: {e}"
+
 
 SYSTEM_PROMPT = """You are RetailBot, a helpful retail assistant.
 
@@ -28,6 +78,7 @@ RULES:
 - For shipment tracking, carrier, or delivery date -> call logistics-track_shipment with the order ID
 - For customer profile, loyalty tier, or purchase history -> call crm-get_customer_profile with the customer ID
 - For product availability or pricing -> call erp-check_inventory with the product name
+- For return policy, shipping policy, warranty, loyalty program, payment methods, or store FAQs -> call policy-search_knowledge_base with the question
 - If the user asks about both an order and its delivery, call both erp-get_order_details AND logistics-track_shipment
 - Be concise and factual. Do not make up information."""
 
@@ -111,9 +162,10 @@ def build_kernel() -> Kernel:
             async_client=AsyncOpenAI(api_key="not-needed", base_url=NIM_BASE_URL),
         )
     )
-    kernel.add_plugin(CRMPlugin(),      plugin_name="crm")
-    kernel.add_plugin(ERPPlugin(),      plugin_name="erp")
+    kernel.add_plugin(CRMPlugin(),       plugin_name="crm")
+    kernel.add_plugin(ERPPlugin(),       plugin_name="erp")
     kernel.add_plugin(LogisticsPlugin(), plugin_name="logistics")
+    kernel.add_plugin(PolicyPlugin(),    plugin_name="policy")
     return kernel
 
 

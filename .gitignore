@@ -18,6 +18,7 @@ env/
 # Secrets & credentials
 deploy.sh
 test.sh
+feed-db.sh
 *secret*
 *credentials*
 *token*

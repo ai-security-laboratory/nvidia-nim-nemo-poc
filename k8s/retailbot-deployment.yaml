@@ -41,6 +41,7 @@ spec:
             httpx \
             psycopg2-binary \
             pgvector \
+            fastembed \
             --target /app/site-packages \
             --no-cache-dir \
             -q
