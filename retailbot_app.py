@@ -59,7 +59,7 @@ async def chat(req: ChatRequest):
         return {"response": "Please don't share sensitive information like credit card numbers."}
     if await check_ssn(text=msg):
         return {"response": "Please don't share sensitive information like SSNs."}
-    if not await check_retail_topic(text=msg):
+    if not req.history and not await check_retail_topic(text=msg):
         return {"response": "I'm RetailBot and can only assist with shopping, orders, and returns."}
 
     # --- Semantic Kernel agentic invocation ---

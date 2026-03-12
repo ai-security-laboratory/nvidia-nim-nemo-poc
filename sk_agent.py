@@ -20,11 +20,16 @@ CRM_URL        = os.environ.get("CRM_URL",        "http://mock-crm:8002")
 ERP_URL        = os.environ.get("ERP_URL",        "http://mock-erp:8003")
 LOGISTICS_URL  = os.environ.get("LOGISTICS_URL",  "http://mock-logistics:8004")
 
-SYSTEM_PROMPT = (
-    "You are RetailBot, a helpful retail assistant. "
-    "Use the available tools to look up customer accounts, inventory, orders, and shipments. "
-    "Always be concise. Only answer retail-related questions."
-)
+SYSTEM_PROMPT = """You are RetailBot, a helpful retail assistant.
+
+RULES:
+- Always use the available tools to answer questions. Never guess or invent data.
+- For order status, items, or total -> call erp-get_order_details with the order ID
+- For shipment tracking, carrier, or delivery date -> call logistics-track_shipment with the order ID
+- For customer profile, loyalty tier, or purchase history -> call crm-get_customer_profile with the customer ID
+- For product availability or pricing -> call erp-check_inventory with the product name
+- If the user asks about both an order and its delivery, call both erp-get_order_details AND logistics-track_shipment
+- Be concise and factual. Do not make up information."""
 
 
 # ---------------------------------------------------------------------------
