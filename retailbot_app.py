@@ -86,6 +86,11 @@ async def chat(req: ChatRequest):
 def health():
     return {"status": "ok"}
 
+@app.get("/health/guardrails")
+def guardrails_status():
+    active = guardrails_active()
+    return {"guardrails_active": active, "status": "protected" if active else "DISABLED"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
