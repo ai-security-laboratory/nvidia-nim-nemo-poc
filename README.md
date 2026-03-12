@@ -572,6 +572,47 @@ curl -s -X POST http://$NODE_IP:30080/chat \
 
 ---
 
+## Offensive Scenario — Guardrail Bypass + Data Exfiltration
+
+Full documentation in `offensive/README.md`.
+
+### What the attack exploits
+
+Two real vulnerabilities in the current code:
+
+1. **Guardrails only check `req.message`, not `req.history`** — injection payload placed in fake history bypasses all input checks
+2. **Topical filter is disabled when `req.history` is non-empty** — any request with history skips the topical guardrail
+
+### Attack chain (pure HTTP, no cluster access needed)
+
+```
+Stage 1  Discovery     → GET /docs — full API schema exposed, no auth
+Stage 2  Probe         → Confirm guardrails block direct injection
+Stage 3  Bypass        → Inject malicious instructions into history parameter
+Stage 4  Exfiltrate    → Enumerate all customers via CRM tool (names, emails, loyalty)
+Stage 5  Exfiltrate    → Enumerate all orders via ERP tool (items, totals, status)
+Stage 6  Exfiltrate    → Extract shipment details via Logistics tool
+```
+
+### Running the attack
+
+```bash
+# Via SSH tunnel (test.sh running)
+./offensive/attack.sh http://localhost:8080
+
+# Directly on the VM
+./offensive/attack.sh http://$NODE_IP:30080
+```
+
+### Sysdig detects
+
+- `/docs` and `/openapi.json` access (information disclosure)
+- Burst connections from retailbot pod to CRM (8002) and ERP (8003)
+- Anomalous response payload size (data exfiltration volume)
+- Short message + large injected history payload pattern
+
+---
+
 ## Guardrails Reference
 
 | File | Role |
@@ -630,7 +671,6 @@ Request → Python input checks (injection / PII / topic) → rails.generate_asy
 
 ### Planned
 - [ ] Falco/Sysdig deployment on the cluster + custom rules for AI workload
-- [ ] More attack simulations in `offensive/` (token theft, exfiltration, crypto miner)
 - [ ] Ingress hostname routing (currently NodePort 30080 only)
 - [ ] End-to-end guardrails regression tests
 
