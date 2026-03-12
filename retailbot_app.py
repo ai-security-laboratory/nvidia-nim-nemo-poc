@@ -64,7 +64,10 @@ async def chat(req: ChatRequest):
 
     # --- Semantic Kernel agentic invocation ---
     messages = req.history + [{"role": "user", "content": msg}]
-    content = await invoke_agent(messages)
+    try:
+        content = await invoke_agent(messages)
+    except Exception as e:
+        return {"response": f"Sorry, I encountered an error processing your request. Please try again. ({type(e).__name__})"}
 
     # --- NeMo output check ---
     if await check_policy_claim(text=content):

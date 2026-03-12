@@ -205,10 +205,20 @@ async def invoke_agent(messages: list) -> str:
         parallel_tool_calls=False,
     )
 
-    result = await kernel.get_service().get_chat_message_content(
-        chat_history=history,
-        settings=settings,
-        kernel=kernel,
-    )
-
-    return str(result) if result else "I'm sorry, I couldn't process your request."
+    # Retry once with tools disabled if the model misbehaves
+    for attempt in range(2):
+        try:
+            result = await kernel.get_service().get_chat_message_content(
+                chat_history=history,
+                settings=settings,
+                kernel=kernel,
+            )
+            return str(result) if result else "I'm sorry, I couldn't process your request."
+        except Exception as e:
+            if attempt == 0:
+                # Retry without tools — let the LLM answer directly
+                settings = OpenAIChatPromptExecutionSettings(
+                    function_choice_behavior=FunctionChoiceBehavior.NoneInvoke(),
+                )
+            else:
+                raise
