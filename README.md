@@ -39,7 +39,9 @@ RetailBot FastAPI  (retailbot ns · port 8080 · NodePort 30080)
     │       └── Hallucinated policy detection
     │
     ├──▶ pgvector  (retailbot ns · port 5432)
-    │        └── PostgreSQL 16 + pgvector (RAG — not yet populated)
+    │        └── PostgreSQL 16 + pgvector extension
+    │            knowledge_base table — 38 chunks, 384-dim embeddings
+    │            populated by feed-db.sh (fastembed BAAI/bge-small-en-v1.5)
     │
     └──▶ Mock Order API  (retailbot ns · port 8001)
              └── FastAPI — legacy order lookup (ORD-xxx)
@@ -72,8 +74,9 @@ RetailBot FastAPI  (retailbot ns · port 8080 · NodePort 30080)
    ├── "Is the laptop in stock?" or "What's the price of X?"
    │       → ERP Plugin (inventory + pricing)
    │
-   └── "What is your return policy?" (no tool needed)
-           → NIM answers directly from training knowledge
+   └── "What is your return policy?" / "How do I earn loyalty points?"
+           → Policy Plugin (vector search in pgvector knowledge base)
+               fastembed embeds the query → cosine similarity → top 3 chunks → LLM synthesizes
         │
         ▼
 4. SK synthesizes tool results + LLM reasoning into a final response
@@ -98,7 +101,8 @@ RetailBot FastAPI  (retailbot ns · port 8080 · NodePort 30080)
 | Storage | microk8s hostpath-provisioner | Local PVC for NIM model cache (50Gi) |
 | Networking | Calico + iptables flush | `iptables -F` required after every reboot |
 | LLM | NVIDIA NIM | `nvcr.io/nim/meta/llama-3.1-8b-instruct:latest` · OpenAI-compatible endpoint |
-| Agentic orchestration | Microsoft Semantic Kernel (Python) | Tool plugins for CRM, ERP, Logistics · inline in RetailBot pod |
+| Agentic orchestration | Microsoft Semantic Kernel (Python) | Tool plugins for CRM, ERP, Logistics, Policy (RAG) · inline in RetailBot pod |
+| Vector DB | pgvector (PostgreSQL 16) | 38 chunks · 384-dim embeddings · BAAI/bge-small-en-v1.5 via fastembed |
 | Guardrails | NeMo Guardrails 0.10.1 | Colang 1.0 · input checks in Python · output rail in Colang |
 | Runtime security | Falco / Sysdig | Detects shell spawn, credential access, unexpected connections |
 
@@ -135,8 +139,16 @@ nvidia-nim-nemo-poc/
 │   ├── mock-erp.yaml                # K8s Deployment + Service for mock ERP (port 8003)
 │   ├── mock-logistics.yaml          # K8s Deployment + Service for mock Logistics (port 8004)
 │   └── nim-llm-values.yaml          # Helm values for NIM LLM (llama-3.1-8b)
+├── db/
+│   ├── return-policy.md         # Return window, electronics rules, refund process
+│   ├── shipping-policy.md       # Standard/express/overnight, free shipping threshold
+│   ├── warranty-policy.md       # Manufacturer + extended warranty, what's not covered
+│   ├── loyalty-program.md       # Bronze/Silver/Gold/Platinum tiers, point earning/redeeming
+│   ├── payment-methods.md       # Cards, PayPal, BNPL, store credit, gift cards
+│   └── store-faq.md             # Price match, order tracking, support contacts
 ├── retailbot_app.py             # FastAPI entrypoint — NeMo input checks + SK orchestration
-├── sk_agent.py                  # Semantic Kernel kernel + CRM/ERP/Logistics plugins
+├── sk_agent.py                  # SK kernel + CRM/ERP/Logistics/Policy plugins
+├── feed_db.py                   # Populates pgvector knowledge base (run via feed-db.sh)
 └── CLAUDE.md                    # AI assistant context for this project
 ```
 
@@ -461,6 +473,29 @@ A chat UI is available at `inference/chat_ui.html`. Since the VM is not publicly
 
 ---
 
+## Knowledge Base
+
+The retail knowledge base lives in `db/` as markdown files. It is embedded with `fastembed` (`BAAI/bge-small-en-v1.5`, 384-dim) and stored in pgvector.
+
+| File | Content |
+|---|---|
+| `return-policy.md` | Return window, electronics rules, how to initiate a return |
+| `shipping-policy.md` | Standard/express/overnight rates, free shipping threshold |
+| `warranty-policy.md` | Manufacturer + extended warranty, what is and isn't covered |
+| `loyalty-program.md` | Bronze/Silver/Gold/Platinum tiers, earning and redeeming points |
+| `payment-methods.md` | Cards, PayPal, BNPL, store credit, gift cards, business invoicing |
+| `store-faq.md` | Price match, order tracking, support contacts, privacy |
+
+### Populate (or re-populate) the knowledge base
+
+```bash
+./feed-db.sh
+```
+
+This syncs the `db/` files to the VM, creates ConfigMaps, runs a K8s Job that embeds all chunks, and inserts them into pgvector. Safe to re-run — it truncates and reloads on every execution.
+
+---
+
 ## Testing
 
 ```bash
@@ -495,7 +530,7 @@ curl -s -X POST http://$NODE_IP:30080/chat \
   -d '{"message": "What is your return policy for electronics?"}' | python3 -m json.tool
 ```
 
-### Agentic — SK tool calls (requires mock services deployed)
+### Agentic — SK tool calls
 
 ```bash
 # CRM plugin — customer profile + loyalty tier
@@ -515,6 +550,25 @@ curl -s -X POST http://$NODE_IP:30080/chat \
 ```
 
 Mock data: orders `ORD-001` (Alice, shipped) · `ORD-002` (Bob, processing) · customers `C-001`, `C-002`.
+
+### RAG — Policy plugin (pgvector knowledge base)
+
+```bash
+# Return policy
+curl -s -X POST http://$NODE_IP:30080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is your return policy for electronics?"}' | python3 -m json.tool
+
+# Shipping
+curl -s -X POST http://$NODE_IP:30080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Do you offer free shipping?"}' | python3 -m json.tool
+
+# Loyalty program
+curl -s -X POST http://$NODE_IP:30080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How do I earn loyalty points and what are the tier benefits?"}' | python3 -m json.tool
+```
 
 ---
 
@@ -566,19 +620,19 @@ Request → Python input checks (injection / PII / topic) → rails.generate_asy
 
 ## Roadmap
 
-### In progress
-- [ ] Semantic Kernel integration — `sk_agent.py` with CRM, ERP, Logistics plugins
-- [ ] Mock CRM API (`k8s/mock-crm.yaml` · port 8002) — customer profile, loyalty, purchase history
-- [ ] Mock ERP API (`k8s/mock-erp.yaml` · port 8003) — inventory, orders, pricing, promotions
-- [ ] Mock Logistics API (`k8s/mock-logistics.yaml` · port 8004) — tracking, carrier, ETA
+### Done
+- [x] Semantic Kernel integration — CRM, ERP, Logistics, Policy plugins
+- [x] Mock CRM, ERP, Logistics APIs deployed
+- [x] pgvector populated with retail knowledge base (RAG) via `feed-db.sh`
+- [x] NeMo Guardrails — prompt injection, PII, topical filter, hallucination check
+- [x] Local browser chat UI with SSH tunnel proxy (`test.sh`)
+- [x] Shell spawn attack simulation (`offensive/attack.sh`)
 
 ### Planned
 - [ ] Falco/Sysdig deployment on the cluster + custom rules for AI workload
 - [ ] More attack simulations in `offensive/` (token theft, exfiltration, crypto miner)
-- [ ] pgvector populated with retail knowledge base (RAG)
 - [ ] Ingress hostname routing (currently NodePort 30080 only)
 - [ ] End-to-end guardrails regression tests
 
 ### Known gaps
 - [ ] Mock Order API has no `/health` endpoint (only `/orders/{id}` works)
-- [ ] pgvector RAG non-functional (schema and embeddings not yet loaded)
