@@ -45,9 +45,15 @@ spec:
                   raise HTTPException(404, f"No products found matching '{product}'")
               return list(matches.values())
 
+          def normalize_order_id(order_id: str) -> str:
+              oid = order_id.upper().replace(" ", "")
+              if oid.startswith("ORD") and "-" not in oid:
+                  oid = "ORD-" + oid[3:]
+              return oid
+
           @app.get("/orders/{order_id}")
           def get_order(order_id: str):
-              order = ORDERS.get(order_id.upper())
+              order = ORDERS.get(normalize_order_id(order_id))
               if not order:
                   raise HTTPException(404, f"Order {order_id} not found")
               return order

@@ -59,9 +59,15 @@ spec:
             },
           }
 
+          def normalize_order_id(order_id: str) -> str:
+              oid = order_id.upper().replace(" ", "")
+              if oid.startswith("ORD") and "-" not in oid:
+                  oid = "ORD-" + oid[3:]
+              return oid
+
           @app.get("/shipments/{order_id}")
           def track_shipment(order_id: str):
-              shipment = SHIPMENTS.get(order_id.upper())
+              shipment = SHIPMENTS.get(normalize_order_id(order_id))
               if not shipment:
                   raise HTTPException(404, f"No shipment found for order {order_id}")
               return shipment

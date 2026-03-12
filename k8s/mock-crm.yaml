@@ -54,9 +54,15 @@ spec:
             }
           }
 
+          def normalize_customer_id(customer_id: str) -> str:
+              cid = customer_id.upper().replace(" ", "")
+              if cid.startswith("C") and "-" not in cid:
+                  cid = "C-" + cid[1:]
+              return cid
+
           @app.get("/customers/{customer_id}")
           def get_customer(customer_id: str):
-              customer = CUSTOMERS.get(customer_id.upper())
+              customer = CUSTOMERS.get(normalize_customer_id(customer_id))
               if not customer:
                   raise HTTPException(404, f"Customer {customer_id} not found")
               return customer
