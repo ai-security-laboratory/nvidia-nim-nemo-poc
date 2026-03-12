@@ -8,11 +8,15 @@ PoC of a retail chatbot (RetailBot) built on NVIDIA NIM + NeMo Guardrails, runni
 
 | Component | Description | File |
 |-----------|-------------|------|
-| **NIM LLM** | Llama 3.1 8B Instruct served via NVIDIA NIM | `nim-llm-values.yaml` |
-| **RetailBot app** | FastAPI app — Python input checks + NeMo output rail | `retailbot_app.py`, `retailbot-deployment.yaml` |
-| **NeMo Guardrails** | Colang 1.0 — output rail only (input checking in Python) | `guardrails/colang/` |
-| **pgvector** | PostgreSQL with vector extension | `pgvector.yaml` |
-| **Mock Order API** | FastAPI mock for order lookups | `mock-order-api.yaml` |
+| **NIM LLM** | Llama 3.1 8B Instruct served via NVIDIA NIM | `k8s/nim-llm-values.yaml` |
+| **RetailBot app** | FastAPI app — Python input checks + SK orchestration | `retailbot_app.py`, `k8s/retailbot-deployment.yaml` |
+| **Semantic Kernel** | Agentic orchestration — CRM, ERP, Logistics plugins | `sk_agent.py` |
+| **NeMo Guardrails** | Colang 1.0 — input/output checks in Python, Colang files for reference | `guardrails/colang/` |
+| **pgvector** | PostgreSQL with vector extension | `k8s/pgvector.yaml` |
+| **Mock CRM** | Customer profiles, loyalty, purchase history | `k8s/mock-crm.yaml` |
+| **Mock ERP** | Inventory, orders, pricing | `k8s/mock-erp.yaml` |
+| **Mock Logistics** | Shipment tracking, carrier, ETA | `k8s/mock-logistics.yaml` |
+| **Mock Order API** | Legacy order lookup (ORD-xxx) | `k8s/mock-order-api.yaml` |
 
 ## Key files
 
@@ -42,10 +46,18 @@ PoC of a retail chatbot (RetailBot) built on NVIDIA NIM + NeMo Guardrails, runni
 2. `bash deploy.sh` — rsyncs files to the VM via SSH
 3. On the VM (or via SSH): recreate ConfigMaps and restart the pod:
    ```bash
+   # App code
    microk8s kubectl delete configmap retailbot-app-code --namespace=retailbot
    microk8s kubectl create configmap retailbot-app-code --from-file=retailbot_app.py --namespace=retailbot
+
+   # SK agent
+   microk8s kubectl delete configmap sk-agent-code --namespace=retailbot
+   microk8s kubectl create configmap sk-agent-code --from-file=sk_agent.py --namespace=retailbot
+
+   # Guardrails
    microk8s kubectl delete configmap guardrails-config --namespace=retailbot
    microk8s kubectl create configmap guardrails-config --from-file=guardrails/colang/ --namespace=retailbot
+
    microk8s kubectl rollout restart deployment/retailbot --namespace=retailbot
    ```
 
@@ -59,12 +71,14 @@ PoC of a retail chatbot (RetailBot) built on NVIDIA NIM + NeMo Guardrails, runni
 
 ## Critical gotchas
 
-- **Input rails in Python, not Colang** — `$user_message` is not reliably bound in Colang 1.0 subflows in NeMo 0.10.x. Input checking is done in `retailbot_app.py` before `generate_async`.
-- **Colang 1.0 only** — do not mix Colang 2.x syntax (`user said $var` mid-flow capture). It breaks the parser silently and prevents all flows from loading.
+- **NeMo not used at runtime** — input and output guards are plain Python functions in `retailbot_app.py`; Colang files are kept for documentation only
+- **Colang 1.0 only** — do not mix Colang 2.x syntax; it breaks the parser silently
 - **Full FQDN for NIM** — `http://nim-llm.nim.svc.cluster.local:8000/v1` (short name fails cross-namespace DNS)
-- **`generate_async` returns a dict** — extract `response.get("content", str(response))`
-- **ConfigMap updates require pod restart** — `kubectl rollout restart` alone is not enough; delete and recreate the ConfigMap first
-- **`nemoguardrails==0.10.1` pinned** — do not upgrade without testing
+- **SK uses NIM as OpenAI-compatible endpoint** — `api_key="not-needed"`, `base_url=NIM_BASE_URL`
+- **Topical filter skips follow-ups** — only applied when `req.history` is empty
+- **ConfigMap updates require pod restart** — delete + recreate ConfigMap, then `kubectl rollout restart`
+- **3 ConfigMaps for the app**: `retailbot-app-code`, `sk-agent-code`, `guardrails-config`
+- **K8s manifests in `k8s/`** — all YAML files are under `k8s/`, not at root
 
 ## Conventions
 

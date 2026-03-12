@@ -376,10 +376,7 @@ kubectl exec -it deploy/pgvector -n retailbot -- \
 #### Mock backends
 
 ```bash
-# Legacy order API (port 8001) — already implemented
 kubectl apply -f k8s/mock-order-api.yaml
-
-# Agentic mock services (ports 8002–8004) — deploy when sk_agent.py is ready
 kubectl apply -f k8s/mock-crm.yaml
 kubectl apply -f k8s/mock-erp.yaml
 kubectl apply -f k8s/mock-logistics.yaml
@@ -388,17 +385,14 @@ kubectl apply -f k8s/mock-logistics.yaml
 #### Create ConfigMaps
 
 ```bash
-# Guardrails Colang files
 kubectl create configmap guardrails-config \
   --from-file=./guardrails/colang/ \
   --namespace=retailbot
 
-# RetailBot FastAPI app
 kubectl create configmap retailbot-app-code \
   --from-file=retailbot_app.py \
   --namespace=retailbot
 
-# Semantic Kernel agent (add once sk_agent.py is implemented)
 kubectl create configmap sk-agent-code \
   --from-file=sk_agent.py \
   --namespace=retailbot
@@ -407,14 +401,18 @@ kubectl create configmap sk-agent-code \
 > **After any code or guardrails edit:** delete and recreate the relevant ConfigMap, then rollout restart.
 >
 > ```bash
-> # Guardrails change
-> kubectl delete configmap guardrails-config --namespace=retailbot
-> kubectl create configmap guardrails-config --from-file=./guardrails/colang/ --namespace=retailbot
-> kubectl rollout restart deployment/retailbot --namespace=retailbot
->
-> # App code change
+> # retailbot_app.py changed
 > kubectl delete configmap retailbot-app-code --namespace=retailbot
 > kubectl create configmap retailbot-app-code --from-file=retailbot_app.py --namespace=retailbot
+>
+> # sk_agent.py changed
+> kubectl delete configmap sk-agent-code --namespace=retailbot
+> kubectl create configmap sk-agent-code --from-file=sk_agent.py --namespace=retailbot
+>
+> # guardrails changed
+> kubectl delete configmap guardrails-config --namespace=retailbot
+> kubectl create configmap guardrails-config --from-file=./guardrails/colang/ --namespace=retailbot
+>
 > kubectl rollout restart deployment/retailbot --namespace=retailbot
 > ```
 
@@ -425,8 +423,7 @@ kubectl apply -f k8s/retailbot-deployment.yaml
 ```
 
 The initContainer installs all Python dependencies into `/app/site-packages` on a shared `emptyDir` volume:
-- `nemoguardrails==0.10.1`, `fastapi`, `uvicorn`, `httpx`, `psycopg2-binary`, `pgvector`
-- `semantic-kernel` (once SK integration is active)
+- `fastapi`, `uvicorn`, `httpx`, `semantic-kernel`, `openai`, `nemoguardrails==0.10.1`, `psycopg2-binary`, `pgvector`
 
 The main container runs with `PYTHONPATH=/app/site-packages`.
 
@@ -434,10 +431,10 @@ The main container runs with `PYTHONPATH=/app/site-packages`.
 
 ```bash
 kubectl get pods --namespace=retailbot
+# mock-crm-xxx         1/1   Running
+# mock-erp-xxx         1/1   Running
+# mock-logistics-xxx   1/1   Running
 # mock-order-api-xxx   1/1   Running
-# mock-crm-xxx         1/1   Running   ← after SK integration
-# mock-erp-xxx         1/1   Running   ← after SK integration
-# mock-logistics-xxx   1/1   Running   ← after SK integration
 # pgvector-xxx         1/1   Running
 # retailbot-xxx        1/1   Running
 
