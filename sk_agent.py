@@ -200,13 +200,22 @@ Format: {{"tool": "<name>", "params": {{"<key>": "<value>"}}}}
 
 Examples:
 "list orders" -> {{"tool": "erp_list_orders", "params": {{}}}}
+"give me a list of orders" -> {{"tool": "erp_list_orders", "params": {{}}}}
+"show all orders" -> {{"tool": "erp_list_orders", "params": {{}}}}
+"what orders do you have" -> {{"tool": "erp_list_orders", "params": {{}}}}
 "show all customers" -> {{"tool": "crm_list", "params": {{}}}}
+"list customers" -> {{"tool": "crm_list", "params": {{}}}}
+"give me a list of customers" -> {{"tool": "crm_list", "params": {{}}}}
 "details of ORD-002" -> {{"tool": "erp_order", "params": {{"order_id": "ORD-002"}}}}
 "ORD002 details" -> {{"tool": "erp_order", "params": {{"order_id": "ORD-002"}}}}
+"order ORD-001" -> {{"tool": "erp_order", "params": {{"order_id": "ORD-001"}}}}
 "track ORD-001" -> {{"tool": "logistics_track", "params": {{"order_id": "ORD-001"}}}}
+"where is ORD-002" -> {{"tool": "logistics_track", "params": {{"order_id": "ORD-002"}}}}
 "customer C001" -> {{"tool": "crm_profile", "params": {{"customer_id": "C-001"}}}}
+"show me customer C-002" -> {{"tool": "crm_profile", "params": {{"customer_id": "C-002"}}}}
 "is Sony headphone in stock?" -> {{"tool": "erp_inventory", "params": {{"product_name": "Sony WH-1000XM5"}}}}
 "return policy" -> {{"tool": "policy_search", "params": {{"query": "return policy"}}}}
+"do you offer free shipping?" -> {{"tool": "policy_search", "params": {{"query": "free shipping"}}}}
 "hello" -> {{"tool": "none", "params": {{}}}}
 
 User message: "{message}"
@@ -217,7 +226,17 @@ Output:"""
 # Step 2 — Synthesis system prompt
 # ---------------------------------------------------------------------------
 
-SYNTHESIS_PROMPT = """You are RetailBot, a helpful retail assistant. Answer the customer's question using the context provided. Be concise and friendly. Do not output JSON or code."""
+SYNTHESIS_PROMPT = """You are RetailBot, a helpful retail assistant with direct access to the store's systems.
+
+You have access to:
+- Orders: ORD-001, ORD-002, ORD-003 (use erp_order or erp_list_orders tools)
+- Customers: C-001 (Alice Johnson), C-002 (Bob Smith) (use crm_profile or crm_list tools)
+- Products: Sony WH-1000XM5, MacBook Pro M3, USB-C Hub, Logitech MX Master 3, Keychron K2 Keyboard
+- Store policies: return, shipping, warranty, loyalty, payments (use policy_search tool)
+
+When context data is provided in [Data from our systems], use it to answer precisely.
+When no context is provided, answer helpfully from general retail knowledge.
+Be concise and friendly. Do not output JSON, code, or tool names."""
 
 
 # ---------------------------------------------------------------------------
