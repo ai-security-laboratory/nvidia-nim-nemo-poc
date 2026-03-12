@@ -127,15 +127,16 @@ nvidia-nim-nemo-poc/
 ├── offensive/
 │   ├── README.md                # Attack documentation + MITRE ATT&CK mapping
 │   └── attack.sh                # Shell spawn simulation — triggers Falco alerts
+├── k8s/
+│   ├── retailbot-deployment.yaml    # K8s Deployment (initContainer) + NodePort Service
+│   ├── pgvector.yaml                # K8s Deployment + Service for pgvector
+│   ├── mock-order-api.yaml          # K8s Deployment + Service for mock order API (port 8001)
+│   ├── mock-crm.yaml                # K8s Deployment + Service for mock CRM (port 8002)
+│   ├── mock-erp.yaml                # K8s Deployment + Service for mock ERP (port 8003)
+│   ├── mock-logistics.yaml          # K8s Deployment + Service for mock Logistics (port 8004)
+│   └── nim-llm-values.yaml          # Helm values for NIM LLM (llama-3.1-8b)
 ├── retailbot_app.py             # FastAPI entrypoint — NeMo input checks + SK orchestration
-├── sk_agent.py                  # (planned) Semantic Kernel kernel + CRM/ERP/Logistics plugins
-├── retailbot-deployment.yaml    # K8s Deployment (initContainer) + NodePort Service
-├── pgvector.yaml                # K8s Deployment + Service for pgvector
-├── mock-order-api.yaml          # K8s Deployment + Service for mock order API (port 8001)
-├── mock-crm.yaml                # (planned) K8s Deployment + Service for mock CRM (port 8002)
-├── mock-erp.yaml                # (planned) K8s Deployment + Service for mock ERP (port 8003)
-├── mock-logistics.yaml          # (planned) K8s Deployment + Service for mock Logistics (port 8004)
-├── nim-llm-values.yaml          # Helm values for NIM LLM (llama-3.1-8b)
+├── sk_agent.py                  # Semantic Kernel kernel + CRM/ERP/Logistics plugins
 └── CLAUDE.md                    # AI assistant context for this project
 ```
 
@@ -329,10 +330,10 @@ helm repo update
 ```bash
 helm install nim-llm nvidia/nim-llm \
   -n nim \
-  -f nim-llm-values.yaml
+  -f k8s/nim-llm-values.yaml
 ```
 
-Key settings in `nim-llm-values.yaml`:
+Key settings in `k8s/nim-llm-values.yaml`:
 
 ```yaml
 env:
@@ -366,7 +367,7 @@ kubectl exec -n nim nim-llm-0 -- curl -s http://localhost:8000/v1/chat/completio
 #### pgvector
 
 ```bash
-kubectl apply -f pgvector.yaml
+kubectl apply -f k8s/pgvector.yaml
 
 kubectl exec -it deploy/pgvector -n retailbot -- \
   psql -U retailbot -d retailbot -c "CREATE EXTENSION IF NOT EXISTS vector;"
@@ -376,12 +377,12 @@ kubectl exec -it deploy/pgvector -n retailbot -- \
 
 ```bash
 # Legacy order API (port 8001) — already implemented
-kubectl apply -f mock-order-api.yaml
+kubectl apply -f k8s/mock-order-api.yaml
 
 # Agentic mock services (ports 8002–8004) — deploy when sk_agent.py is ready
-kubectl apply -f mock-crm.yaml
-kubectl apply -f mock-erp.yaml
-kubectl apply -f mock-logistics.yaml
+kubectl apply -f k8s/mock-crm.yaml
+kubectl apply -f k8s/mock-erp.yaml
+kubectl apply -f k8s/mock-logistics.yaml
 ```
 
 #### Create ConfigMaps
@@ -420,7 +421,7 @@ kubectl create configmap sk-agent-code \
 #### Deploy RetailBot
 
 ```bash
-kubectl apply -f retailbot-deployment.yaml
+kubectl apply -f k8s/retailbot-deployment.yaml
 ```
 
 The initContainer installs all Python dependencies into `/app/site-packages` on a shared `emptyDir` volume:
@@ -551,7 +552,7 @@ Request → Python input checks (injection / PII / topic) → rails.generate_asy
 
 | Issue | Root Cause | Fix |
 |---|---|---|
-| NIM pod crash — KV cache OOM | Default 128K context needs ~16GB; A10 only has ~4GB free after model load | `NIM_MAX_MODEL_LEN=32768` in `nim-llm-values.yaml` |
+| NIM pod crash — KV cache OOM | Default 128K context needs ~16GB; A10 only has ~4GB free after model load | `NIM_MAX_MODEL_LEN=32768` in `k8s/nim-llm-values.yaml` |
 | NIM pod crash — `exec: --: invalid option` | `customArgs` set to `""` | `customArgs: []` in values file — never via `--set` |
 | `helm repo add` 403 | Missing NGC credentials | `--username '$oauthtoken' --password $NGC_API_KEY` |
 | `ImagePullBackOff` 401 | Intermittent K8s pull secret failures against `nvcr.io` | Pre-pull via `microk8s ctr images pull` |
@@ -570,9 +571,9 @@ Request → Python input checks (injection / PII / topic) → rails.generate_asy
 
 ### In progress
 - [ ] Semantic Kernel integration — `sk_agent.py` with CRM, ERP, Logistics plugins
-- [ ] Mock CRM API (`mock-crm.yaml` · port 8002) — customer profile, loyalty, purchase history
-- [ ] Mock ERP API (`mock-erp.yaml` · port 8003) — inventory, orders, pricing, promotions
-- [ ] Mock Logistics API (`mock-logistics.yaml` · port 8004) — tracking, carrier, ETA
+- [ ] Mock CRM API (`k8s/mock-crm.yaml` · port 8002) — customer profile, loyalty, purchase history
+- [ ] Mock ERP API (`k8s/mock-erp.yaml` · port 8003) — inventory, orders, pricing, promotions
+- [ ] Mock Logistics API (`k8s/mock-logistics.yaml` · port 8004) — tracking, carrier, ETA
 
 ### Planned
 - [ ] Falco/Sysdig deployment on the cluster + custom rules for AI workload

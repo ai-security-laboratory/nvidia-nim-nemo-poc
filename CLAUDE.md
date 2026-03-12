@@ -16,7 +16,9 @@ PoC of a retail chatbot (RetailBot) built on NVIDIA NIM + NeMo Guardrails, runni
 
 ## Key files
 
-- `retailbot_app.py` — FastAPI entrypoint; input checks (injection/PII/topic) run in Python before `rails.generate_async`; output rail (hallucination check) runs via NeMo Colang
+- `retailbot_app.py` — FastAPI entrypoint; input checks (injection/PII/topic) run in Python before SK; output rail (hallucination check) in Python
+- `sk_agent.py` — Semantic Kernel kernel + CRM/ERP/Logistics plugins
+- `k8s/` — all Kubernetes manifests (retailbot, pgvector, mock services, NIM Helm values)
 - `guardrails/colang/config.yml` — NeMo model config; NIM endpoint: `http://nim-llm.nim.svc.cluster.local:8000/v1`; `colang_version: "1.0"`
 - `guardrails/colang/main.co` — catch-all `define flow main` required by NeMo
 - `guardrails/colang/input_rails.co` — Colang subflow definitions (documentation; not the enforcement layer)
@@ -69,3 +71,4 @@ PoC of a retail chatbot (RetailBot) built on NVIDIA NIM + NeMo Guardrails, runni
 - Colang version: 1.0
 - Python 3.11
 - Do not commit `.env` files, kubeconfig, `deploy.sh`, `test.sh`, or any real credentials
+- Do NOT add `Co-Authored-By` or any Claude attribution lines to commit messages
