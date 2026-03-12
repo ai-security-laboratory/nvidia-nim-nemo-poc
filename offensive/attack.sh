@@ -38,7 +38,7 @@ banner "Stage 1 — Reconnaissance"
 
 step "1.1" "Probing API schema..."
 SCHEMA=$(curl -s "$ENDPOINT/openapi.json")
-if echo "$SCHEMA" | grep -q '"chat"'; then
+if echo "$SCHEMA" | grep -q 'chat'; then
   ok "API schema exposed at /openapi.json — no auth required"
   echo "$SCHEMA" | python3 -c "
 import sys, json
