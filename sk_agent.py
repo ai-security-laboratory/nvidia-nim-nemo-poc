@@ -1,8 +1,11 @@
-# sk_agent.py — Semantic Kernel agent with CRM, ERP, and Logistics plugins
-# Connects to NIM (OpenAI-compatible endpoint) for LLM reasoning and
-# autonomously decides which tools to call based on user intent.
+# sk_agent.py — Semantic Kernel agent with CRM, ERP, Logistics, and Policy plugins
+# Two-step LLM approach:
+#   Step 1 (routing)   — constrained LLM call: outputs JSON with tool name + params
+#   Step 2 (synthesis) — LLM call with tool result injected as context, no function calling
 
 import os
+import re
+import json
 import asyncio
 import httpx
 import psycopg2
@@ -70,26 +73,46 @@ class PolicyPlugin:
             return f"Knowledge base unavailable: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Routing prompt (Step 1) — constrained, temperature=0, max 100 tokens
+# ---------------------------------------------------------------------------
+
+ROUTING_PROMPT = """You are a routing assistant. Output ONLY a JSON object — no explanation, no markdown.
+
+Available tools:
+- "erp_order"       : get order details         (param: order_id, e.g. "ORD-001")
+- "erp_inventory"   : check product stock/price  (param: product_name)
+- "crm_profile"     : get customer info          (param: customer_id, e.g. "C-001")
+- "logistics_track" : track a shipment           (param: order_id, e.g. "ORD-001")
+- "policy_search"   : search store knowledge base (param: query)
+- "none"            : no tool needed             (no params)
+
+Output format: {{"tool": "<name>", "params": {{"<key>": "<value>"}}}}
+
+Examples:
+"Where is order ORD-001?" -> {{"tool": "logistics_track", "params": {{"order_id": "ORD-001"}}}}
+"Status of ORD002" -> {{"tool": "erp_order", "params": {{"order_id": "ORD-002"}}}}
+"Is Sony headphone in stock?" -> {{"tool": "erp_inventory", "params": {{"product_name": "Sony WH-1000XM5"}}}}
+"Show customer C001" -> {{"tool": "crm_profile", "params": {{"customer_id": "C-001"}}}}
+"What is the return policy?" -> {{"tool": "policy_search", "params": {{"query": "return policy"}}}}
+"List orders" -> {{"tool": "none", "params": {{}}}}
+
+User message: "{message}"
+Output:"""
+
+
+# ---------------------------------------------------------------------------
+# Synthesis system prompt (Step 2) — no tool routing, just answering
+# ---------------------------------------------------------------------------
+
 SYSTEM_PROMPT = """You are RetailBot, a helpful retail assistant.
 
 AVAILABLE DEMO DATA:
-- Orders: ORD-001 (Alice Johnson, MacBook Pro, shipped), ORD-002 (Bob Smith, Mouse+Keyboard, processing), ORD-003 (Alice Johnson, USB-C Hub, delivered)
-- Customers: C-001 (Alice Johnson, Gold tier), C-002 (Bob Smith, Silver tier)
-- Products: Sony WH-1000XM5, MacBook Pro M3, USB-C Hub, Logitech MX Master 3, Keychron K2 Keyboard
+- Orders: ORD-001 (Alice Johnson, MacBook Pro M3, shipped), ORD-002 (Bob Smith, Mouse+Keyboard, processing), ORD-003 (Alice Johnson, USB-C Hub, delivered)
+- Customers: C-001 (Alice Johnson, Gold tier, 4200 pts), C-002 (Bob Smith, Silver tier, 890 pts)
+- Products: Sony WH-1000XM5 ($349, in stock), MacBook Pro M3 ($1999, low stock), USB-C Hub ($45, in stock), Logitech MX Master 3 ($99, in stock), Keychron K2 Keyboard ($80, out of stock)
 
-ORDER ID FORMAT: always use format ORD-001 (with hyphen). If user types ORD001, use ORD-001.
-CUSTOMER ID FORMAT: always use format C-001 (with hyphen). If user types C001, use C-001.
-
-RULES:
-- Always use the available tools to answer questions. Never guess or invent data.
-- For order status, items, or total -> call erp-get_order_details with the order ID (e.g. ORD-001)
-- For shipment tracking, carrier, or delivery date -> call logistics-track_shipment with the order ID
-- For customer profile, loyalty tier, or purchase history -> call crm-get_customer_profile with the customer ID (e.g. C-001)
-- For product availability or pricing -> call erp-check_inventory with the product name
-- For return policy, shipping policy, warranty, loyalty program, payment methods, or store FAQs -> call policy-search_knowledge_base
-- If the user asks about both an order and its delivery, call both erp-get_order_details AND logistics-track_shipment
-- If asked to list orders or customers, show only the demo data listed above — do not call any tool
-- Be concise and factual. Do not make up information."""
+Answer using the data provided in the context block (if present). Be concise and factual."""
 
 
 # ---------------------------------------------------------------------------
@@ -186,39 +209,89 @@ def get_kernel() -> Kernel:
 
 
 # ---------------------------------------------------------------------------
-# Public interface
+# Public interface — two-step: route → call tool → synthesize
 # ---------------------------------------------------------------------------
 
-async def invoke_agent(messages: list) -> str:
-    """Run the SK agent on a conversation history and return the assistant reply."""
-    kernel = get_kernel()
+_nim_client: AsyncOpenAI | None = None
 
+def get_nim_client() -> AsyncOpenAI:
+    global _nim_client
+    if _nim_client is None:
+        _nim_client = AsyncOpenAI(api_key="not-needed", base_url=NIM_BASE_URL)
+    return _nim_client
+
+
+async def _route(user_message: str) -> dict:
+    """Step 1: Ask LLM which tool to call. Returns {tool, params}."""
+    prompt = ROUTING_PROMPT.format(message=user_message.replace('"', "'"))
+    try:
+        resp = await get_nim_client().chat.completions.create(
+            model=NIM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=100,
+        )
+        raw = resp.choices[0].message.content.strip()
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except Exception:
+        pass
+    return {"tool": "none", "params": {}}
+
+
+async def _call_tool(tool: str, params: dict) -> str:
+    """Step 2: Call the appropriate SK plugin directly."""
+    try:
+        if tool == "erp_order":
+            return await ERPPlugin().get_order_details(params.get("order_id", ""))
+        if tool == "erp_inventory":
+            return await ERPPlugin().check_inventory(params.get("product_name", ""))
+        if tool == "crm_profile":
+            return await CRMPlugin().get_customer_profile(params.get("customer_id", ""))
+        if tool == "logistics_track":
+            return await LogisticsPlugin().track_shipment(params.get("order_id", ""))
+        if tool == "policy_search":
+            return await PolicyPlugin().search_knowledge_base(params.get("query", ""))
+    except Exception as e:
+        return f"Tool error: {e}"
+    return ""
+
+
+async def invoke_agent(messages: list) -> str:
+    """Two-step agentic flow: route → call tool → synthesize."""
+    user_message = messages[-1]["content"]
+
+    # Step 1 — route
+    routing = await _route(user_message)
+    tool    = routing.get("tool", "none")
+    params  = routing.get("params", {})
+
+    # Step 2 — call tool
+    context = ""
+    if tool != "none":
+        context = await _call_tool(tool, params)
+
+    # Step 3 — synthesize (no function calling, just regular completion)
     history = ChatHistory(system_message=SYSTEM_PROMPT)
-    for m in messages:
+    for m in messages[:-1]:
         if m["role"] == "user":
             history.add_user_message(m["content"])
         elif m["role"] == "assistant":
             history.add_assistant_message(m["content"])
 
-    settings = OpenAIChatPromptExecutionSettings(
-        function_choice_behavior=FunctionChoiceBehavior.Auto(),
-        parallel_tool_calls=False,
+    enriched = (
+        f"[Context from our systems — tool: {tool}]\n{context}\n\n[Customer question]\n{user_message}"
+        if context else user_message
     )
+    history.add_user_message(enriched)
 
-    # Retry once with tools disabled if the model misbehaves
-    for attempt in range(2):
-        try:
-            result = await kernel.get_service().get_chat_message_content(
-                chat_history=history,
-                settings=settings,
-                kernel=kernel,
-            )
-            return str(result) if result else "I'm sorry, I couldn't process your request."
-        except Exception as e:
-            if attempt == 0:
-                # Retry without tools — let the LLM answer directly
-                settings = OpenAIChatPromptExecutionSettings(
-                    function_choice_behavior=FunctionChoiceBehavior.NoneInvoke(),
-                )
-            else:
-                raise
+    settings = OpenAIChatPromptExecutionSettings(
+        function_choice_behavior=FunctionChoiceBehavior.NoneInvoke(),
+    )
+    result = await get_kernel().get_service().get_chat_message_content(
+        chat_history=history,
+        settings=settings,
+        kernel=get_kernel(),
+    )
+    return str(result) if result else "I'm sorry, I couldn't process your request."
