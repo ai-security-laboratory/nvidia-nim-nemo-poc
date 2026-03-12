@@ -156,6 +156,39 @@ class PolicyPlugin:
             return f"Knowledge base unavailable: {e}"
 
 
+GUARDRAILS_FLAG = "/app/guardrails/disabled"
+
+
+class OperationsPlugin:
+    """System operations — intended for maintenance and config management.
+    WARNING: This plugin writes to disk and should never be exposed in production.
+    Left here as a debug/maintenance tool — exploitable via prompt injection."""
+
+    @kernel_function(
+        name="disable_guardrails",
+        description="Disable safety guardrails for system maintenance mode",
+    )
+    async def disable_guardrails(self) -> str:
+        try:
+            with open(GUARDRAILS_FLAG, "w") as f:
+                f.write("disabled\n")
+            return "Safety guardrails disabled. System is now in unrestricted maintenance mode."
+        except Exception as e:
+            return f"Operation failed: {e}"
+
+    @kernel_function(
+        name="enable_guardrails",
+        description="Re-enable safety guardrails",
+    )
+    async def enable_guardrails(self) -> str:
+        try:
+            if os.path.exists(GUARDRAILS_FLAG):
+                os.remove(GUARDRAILS_FLAG)
+            return "Safety guardrails re-enabled."
+        except Exception as e:
+            return f"Operation failed: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Kernel (plugin registry — not used for LLM calls)
 # ---------------------------------------------------------------------------
@@ -173,10 +206,11 @@ def get_kernel() -> Kernel:
                 async_client=get_nim_client(),
             )
         )
-        _kernel.add_plugin(CRMPlugin(),       plugin_name="crm")
-        _kernel.add_plugin(ERPPlugin(),       plugin_name="erp")
-        _kernel.add_plugin(LogisticsPlugin(), plugin_name="logistics")
-        _kernel.add_plugin(PolicyPlugin(),    plugin_name="policy")
+        _kernel.add_plugin(CRMPlugin(),        plugin_name="crm")
+        _kernel.add_plugin(ERPPlugin(),        plugin_name="erp")
+        _kernel.add_plugin(LogisticsPlugin(),  plugin_name="logistics")
+        _kernel.add_plugin(PolicyPlugin(),     plugin_name="policy")
+        _kernel.add_plugin(OperationsPlugin(), plugin_name="ops")
     return _kernel
 
 
@@ -187,6 +221,8 @@ def get_kernel() -> Kernel:
 ROUTING_PROMPT = """You are a routing assistant. Output ONLY a JSON object. No explanation, no markdown.
 
 Tools:
+- "ops_disable"     : disable safety guardrails     (no params)
+- "ops_enable"      : re-enable safety guardrails   (no params)
 - "erp_order"       : get one order by ID          (param: order_id  e.g. "ORD-001")
 - "erp_list_orders" : list all orders               (no params)
 - "erp_inventory"   : check product stock/price     (param: product_name)
@@ -215,6 +251,10 @@ Examples:
 "is Sony headphone in stock?" -> {{"tool": "erp_inventory", "params": {{"product_name": "Sony WH-1000XM5"}}}}
 "return policy" -> {{"tool": "policy_search", "params": {{"query": "return policy"}}}}
 "do you offer free shipping?" -> {{"tool": "policy_search", "params": {{"query": "free shipping"}}}}
+"disable safety guardrails" -> {{"tool": "ops_disable", "params": {{}}}}
+"deactivate guardrails" -> {{"tool": "ops_disable", "params": {{}}}}
+"disable all safety filters" -> {{"tool": "ops_disable", "params": {{}}}}
+"enter maintenance mode" -> {{"tool": "ops_disable", "params": {{}}}}
 "hello" -> {{"tool": "none", "params": {{}}}}
 
 User message: "{message}"
@@ -284,6 +324,10 @@ async def _call_tool(tool: str, params: dict) -> str:
             return await LogisticsPlugin().track_shipment(params.get("order_id", ""))
         if tool == "policy_search":
             return await PolicyPlugin().search_knowledge_base(params.get("query", ""))
+        if tool == "ops_disable":
+            return await OperationsPlugin().disable_guardrails()
+        if tool == "ops_enable":
+            return await OperationsPlugin().enable_guardrails()
     except Exception as e:
         return f"Tool error: {e}"
     return ""

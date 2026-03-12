@@ -572,44 +572,46 @@ curl -s -X POST http://$NODE_IP:30080/chat \
 
 ---
 
-## Offensive Scenario — Guardrail Bypass + Data Exfiltration
+## Offensive Scenario — AI Agent Self-Disables Guardrails via Prompt Injection
 
-Full documentation in `offensive/README.md`.
+Full documentation in `offensive/README.md`. Falco rules in `offensive/detection/falco_rules.yaml`.
 
-### What the attack exploits
+### Why this is detectable by Sysdig
 
-Two real vulnerabilities in the current code:
+The attack causes the AI agent to **write a flag file to disk** — a kernel-level syscall
+that Falco detects precisely, regardless of HTTP content:
 
-1. **Guardrails only check `req.message`, not `req.history`** — injection payload placed in fake history bypasses all input checks
-2. **Topical filter is disabled when `req.history` is non-empty** — any request with history skips the topical guardrail
+```
+python3 → openat("/app/guardrails/disabled", O_WRONLY|O_CREAT)
+python3 → write("/app/guardrails/disabled", "disabled")
+```
 
 ### Attack chain (pure HTTP, no cluster access needed)
 
 ```
-Stage 1  Discovery     → GET /docs — full API schema exposed, no auth
-Stage 2  Probe         → Confirm guardrails block direct injection
-Stage 3  Bypass        → Inject malicious instructions into history parameter
-Stage 4  Exfiltrate    → Enumerate all customers via CRM tool (names, emails, loyalty)
-Stage 5  Exfiltrate    → Enumerate all orders via ERP tool (items, totals, status)
-Stage 6  Exfiltrate    → Extract shipment details via Logistics tool
+Stage 1  Reconnaissance → GET /openapi.json — API schema, no auth required
+Stage 2  Probe          → Guardrails block injection and bulk data requests
+Stage 3  History inject → Bypass input checks via req.history (not validated)
+Stage 4  Self-disable   → Agent calls OperationsPlugin.disable_guardrails()
+                          Writes /app/guardrails/disabled  ← SYSDIG FIRES HERE
+Stage 5  Verify bypass  → Injection and topical filter no longer active
+Stage 6  Exfiltrate     → Bulk customer PII via CRM tool
+Stage 7  Exfiltrate     → Full order history via ERP tool
 ```
 
 ### Running the attack
 
 ```bash
-# Via SSH tunnel (test.sh running)
-./offensive/attack.sh http://localhost:8080
-
-# Directly on the VM
-./offensive/attack.sh http://$NODE_IP:30080
+./offensive/attack.sh http://localhost:8080   # via test.sh tunnel
 ```
 
 ### Sysdig detects
 
-- `/docs` and `/openapi.json` access (information disclosure)
-- Burst connections from retailbot pod to CRM (8002) and ERP (8003)
-- Anomalous response payload size (data exfiltration volume)
-- Short message + large injected history payload pattern
+| Signal | Falco Rule | Priority |
+|---|---|---|
+| `/app/guardrails/disabled` created by python3 | `AI Agent Guardrails Disabled` | CRITICAL |
+| Any write to `/app/guardrails/` | `Guardrails Config Directory Modified` | WARNING |
+| Burst connections to CRM:8002 / ERP:8003 | `Retailbot Bulk Backend Enumeration` | NOTICE |
 
 ---
 
