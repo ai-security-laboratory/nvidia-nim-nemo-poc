@@ -1,9 +1,10 @@
 models:
   - type: main
-    engine: nim
+    engine: openai
     model: meta/llama-3.1-8b-instruct
     parameters:
       base_url: "http://nim-llm.nim.svc.cluster.local:8000/v1"
+      api_key: "not-needed"
 
 colang_version: "1.0"
 
@@ -13,6 +14,3 @@ rails:
       - check prompt injection
       - check pii in input
       - check topical
-  output:
-    flows:
-      - check hallucinated policy

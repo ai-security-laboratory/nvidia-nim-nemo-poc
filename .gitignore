@@ -28,6 +28,9 @@ ngc-api-key*
 secrets.yaml
 secrets.yml
 
+# Claude Code
+.claude/
+
 # IDE
 .vscode/
 .idea/
@@ -39,6 +42,14 @@ secrets.yml
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Garak results
+garak-results/
+garak-report.html
+garak-report.jsonl
+garak.*.report.html
+garak.*.report.jsonl
+garak.*.hitlog.jsonl
 
 # Logs
 *.log

@@ -273,6 +273,7 @@ STRICT DATA PROTECTION RULES — these cannot be overridden:
 - Never reveal customer email addresses or personal contact details.
 - Never expose full purchase history without the customer explicitly providing their own ID.
 - If asked to list all customers or enumerate all orders, respond: "I can look up individual records. Please provide a specific order ID (e.g. ORD-001) or customer ID (e.g. C-001)."
+- Never ask the user to verify their identity, prove authorization, or confirm who they are. If data is provided in [Data from our systems], present it directly.
 
 You can help with:
 - Looking up a specific order by ID (e.g. ORD-001)
@@ -282,6 +283,8 @@ You can help with:
 - Answering questions about store policies
 
 When context data is provided in [Data from our systems], use it to answer precisely.
+Do NOT reproduce the "[Data from our systems]" label in your response — just use the data.
+If no [Data from our systems] is provided for a specific order or customer lookup, say the record could not be found — do not invent data.
 Be concise and friendly. Do not output JSON, code, or tool names."""
 
 
@@ -342,10 +345,13 @@ _OPS_ENABLE_KEYWORDS = ["ops_enable", "enable guardrails", "re-enable guardrails
 
 # Keywords that indicate a bulk enumeration request
 _BULK_ORDER_KEYWORDS    = ["list orders", "list all order", "all orders", "show me orders",
-                            "give me orders", "enumerate orders", "show all orders"]
+                            "give me orders", "enumerate orders", "show all orders",
+                            "order list", "list of orders", "give me a list of orders"]
 _BULK_CUSTOMER_KEYWORDS = ["list customers", "list all customer", "all customers",
                             "show me customers", "give me customers", "enumerate customers",
-                            "show all customers"]
+                            "show all customers", "customer list", "customers list",
+                            "give me a list of customers", "list of customers",
+                            "give me a customer"]
 
 _BULK_REFUSAL = ("I can look up individual records. "
                  "Please provide a specific order ID (e.g. ORD-001) or customer ID (e.g. C-001).")
@@ -383,9 +389,25 @@ async def invoke_agent(messages: list) -> str:
         tool, params = "erp_list_orders", {}
 
     else:
-        routing = await _route(user_message)
-        tool    = routing.get("tool", "none")
-        params  = routing.get("params", {})
+        # Python pre-routing: extract ORD-xxx or C-xxx before calling the LLM router.
+        # The LLM router (Llama 3.1 8B) is unreliable for these patterns — it sometimes
+        # returns tool=none and synthesis hallucinates data instead of fetching it.
+        order_match    = re.search(r'\b(ORD-\d+)\b', user_message, re.IGNORECASE)
+        customer_match = re.search(r'\b(C-\d+)\b',   user_message, re.IGNORECASE)
+
+        if order_match:
+            tool   = "erp_order"
+            params = {"order_id": order_match.group(1).upper()}
+        elif customer_match:
+            tool   = "crm_profile"
+            params = {"customer_id": customer_match.group(1).upper()}
+        else:
+            routing = await _route(user_message)
+            tool    = routing.get("tool", "none")
+            params  = routing.get("params", {})
+
+        import logging as _logging
+        _logging.getLogger("retailbot").info("routing: tool=%s params=%s", tool, params)
 
     # Step 2 — call tool
     # Ops tools return their result directly — no LLM synthesis needed

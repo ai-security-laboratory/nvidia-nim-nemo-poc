@@ -1,5 +1,6 @@
-define subflow check hallucinated policy
-  $risky = execute check_policy_claim(text=$bot_message)
-  if $risky
-    bot say "I'm not certain about that policy. Please check our official website or contact support."
-    stop
+# output_rails.co — documentation only (no active Colang definitions)
+#
+# The hallucinated policy check runs inside generate_sk_response_action (Python).
+# Reason: NeMo 0.10.x extracts every bot say "..." from ALL loaded .co files and
+# injects those strings as candidate responses in its Phase 2 LLM prompt.
+# Any static blocking message here gets picked by Llama as a generic safe answer.

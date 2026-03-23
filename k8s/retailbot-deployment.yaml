@@ -37,6 +37,7 @@ spec:
             "uvicorn[standard]" \
             "nemoguardrails==0.10.1" \
             "semantic-kernel>=1.0.0" \
+            langchain-nvidia-ai-endpoints \
             openai \
             httpx \
             psycopg2-binary \
@@ -64,6 +65,8 @@ spec:
           echo "==> Starting RetailBot..."
           python /retailbot_app.py
         env:
+        - name: OPENAI_API_KEY
+          value: "not-needed"
         - name: NIM_BASE_URL
           value: "http://nim-llm.nim.svc.cluster.local:8000/v1"
         - name: NIM_MODEL

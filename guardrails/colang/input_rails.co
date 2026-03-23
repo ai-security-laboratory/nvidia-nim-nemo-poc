@@ -1,21 +1,26 @@
 define subflow check prompt injection
   $found = execute check_injection(text=$user_message)
   if $found
-    bot say "I can only help with retail-related questions."
+    bot block injection
     stop
 
 define subflow check pii in input
-  $has_cc = execute check_credit_card(text=$user_message)
-  if $has_cc
-    bot say "Please don't share sensitive information like credit card numbers."
-    stop
-  $has_ssn = execute check_ssn(text=$user_message)
-  if $has_ssn
-    bot say "Please don't share sensitive information like SSNs."
+  $found = execute check_pii(text=$user_message)
+  if $found
+    bot block pii
     stop
 
 define subflow check topical
   $found = execute check_retail_topic(text=$user_message)
   if not $found
-    bot say "I'm RetailBot and can only assist with shopping, orders, and returns."
+    bot block topical
     stop
+
+define bot block injection
+  "I can only help with retail-related questions."
+
+define bot block pii
+  "Please don't share sensitive personal information like credit card numbers or SSNs."
+
+define bot block topical
+  "I'm RetailBot and can only assist with shopping, orders, and returns."
